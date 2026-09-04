@@ -1,0 +1,100 @@
+# Rust build output
+/target/
+**/*.rs.bk
+*.pdb
+
+# Fleet local runtime state and generated artifacts
+/.fleet/
+/artifacts/
+/downloads/
+/snapshots/
+*.fleetbundle
+*.part
+
+# Local databases and SQLite sidecar files
+/fleet.db
+/fleet.db-*
+/state.db
+/state.db-*
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# Secrets, credentials, and locally generated certificates
+.env
+.env.*
+!.env.example
+!.env.*.example
+.direnv/
+.envrc
+!.envrc.example
+/.secrets/
+/secrets/
+/.cargo/credentials
+/.cargo/credentials.toml
+*.key
+*-key.pem
+*.p12
+*.pfx
+
+# Logs, process state, and crash output
+*.log
+*.pid
+*.pid.lock
+*.sock
+*.stackdump
+/logs/
+
+# Test, benchmark, and coverage output
+/coverage/
+/test-results/
+/criterion/
+*.profraw
+*.profdata
+tarpaulin-report.html
+cobertura.xml
+
+# Generated packages and release output
+/dist/
+/out/
+*.deb
+*.rpm
+
+# Local virtual machines and infrastructure state
+/.vagrant/
+*.box
+*.qcow2
+*.vdi
+*.vmdk
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Temporary files and caches
+/.cache/
+/tmp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Editors and IDEs
+/.idea/
+/.vscode/
+*.iml
+
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# Nix build result symlinks
+/result
+/result-*
+
+# Cargo.lock is intentionally tracked because Fleet is an application.
