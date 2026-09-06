@@ -1,0 +1,6 @@
+{
+  "name": "demo-service",
+  "program": "/bin/sleep",
+  "args": ["10"],
+  "replicas": 1
+}

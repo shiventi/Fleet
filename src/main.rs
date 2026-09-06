@@ -1,20 +1,36 @@
+//! A replica planner and a basic local process supervisor.
+
+mod cli;
+mod runner;
 mod workload;
 
-use std::process::Command;
+use clap::Parser;
+use cli::{Cli, Commands};
+use runner::ProcessRunner;
 use workload::WorkloadSpec;
 
+/// The reported number of running copies of a workload.
 #[derive(Debug)]
 struct ObservedWorkload {
+    /// The workload this observation belongs to.
     name: String,
+    /// The number of copies observed alive during this check.
     running: u32,
 }
 
+/// A requested change to a workload's running copies.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
+    /// Requests one additional copy of the named workload.
     Start { workload_name: String },
+    /// Requests one fewer copy; execution is not implemented yet.
     Stop { workload_name: String },
 }
 
+/// Decides what to start or stop without running anything.
+///
+/// # Panics
+/// Panics if the desired and observed workload names differ.
 fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
     assert_eq!(
         desired.name, observed.name,
@@ -40,41 +56,49 @@ fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
     }
 }
 
-fn main() {
-    let desired = WorkloadSpec {
-        name: String::from("example-api"),
-        replicas: 3,
-        program: String::from("/bin/sleep"),
-        args: vec![String::from("10")],
-    };
+/// Repeatedly observes the demo workload and starts missing copies.
+fn supervise(desired: WorkloadSpec) {
+    let mut runner = ProcessRunner::new();
 
-    let observed = ObservedWorkload {
-        name: String::from("example-api"),
-        running: 1,
-    };
-
-    let actions = plan(&desired, &observed);
-
-    println!("Planned actions: {actions:#?}");
-
-    let mut child = Command::new(&desired.program)
-        .args(&desired.args)
-        .spawn()
-        .expect("failed to start sleep");
-    
-    println!("Started process: {}", child.id());
-    
     loop {
-        let status = child.try_wait().expect("failed to wait for sleep");
-        match status {
-            Some(exit_status) => {
-                println!("Process exited: {exit_status:?}");
-                child = Command::new(&desired.program).args(&desired.args).spawn().expect("failed to start sleep");
-                println!("Restarted process: {}", child.id())
-            },
-            None => println!("Process still running.")
+        let count = runner.running_count();
+
+        let observed = ObservedWorkload {
+            name: desired.name.clone(),
+            running: u32::try_from(count).expect("process count exceeds u32"),
+        };
+
+        let actions = plan(&desired, &observed);
+
+        println!("Planned actions: {actions:#?}");
+
+        println!("Running count: {}", count);
+
+        for act in actions {
+            match act {
+                Action::Start { workload_name } => {
+                    println!("Starting workload: {}", workload_name);
+                    runner.start(&desired);
+                }
+                Action::Stop { workload_name } => {
+                    println!("Stopping isn't implemented yet for {}", workload_name);
+                }
+            }
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Run { manifest } => {
+            let contents = std::fs::read_to_string(&manifest).expect("failed to read manifest");
+            let desired: WorkloadSpec =
+                serde_json::from_str(&contents).expect("invalid workload manifest");
+            println!("Desired: {:#?}", desired);
+            supervise(desired);
+        }
     }
 }
 
