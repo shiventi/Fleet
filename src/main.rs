@@ -8,6 +8,8 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use runner::ProcessRunner;
 use workload::WorkloadSpec;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The reported number of running copies of a workload.
 #[derive(Debug)]
@@ -56,11 +58,17 @@ fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
     }
 }
 
-/// Repeatedly observes the demo workload and starts missing copies.
+/// Repeatedly observes the supplied workload and starts missing copies.
 fn supervise(desired: WorkloadSpec) {
     let mut runner = ProcessRunner::new();
+    let keep_alive = Arc::new(AtomicBool::new(true));
+    let handler_keep_alive = Arc::clone(&keep_alive);
 
-    loop {
+    ctrlc::set_handler(move || {
+        handler_keep_alive.store(false, Ordering::SeqCst)
+    }).expect("failed to register the ctrl+c handler");
+
+    while keep_alive.load(Ordering::SeqCst) {
         let count = runner.running_count();
 
         let observed = ObservedWorkload {
@@ -87,18 +95,51 @@ fn supervise(desired: WorkloadSpec) {
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
+
+    runner.stop_all();
+}
+
+/// Reads and validates a JSON manifest without starting any processes.
+///
+/// # Errors
+/// Returns an error if the file cannot be read, deserialized, or validated.
+fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file '{}': {}", path.display(), e))?;
+
+    let desired: WorkloadSpec = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse JSON in '{}': {}", path.display(), e))?;
+
+    desired
+        .validate()
+        .map_err(|error| format!("Invalid workload manifest '{}': {}", path.display(), error))?;
+
+    Ok(desired)
 }
 
 fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Run { manifest } => {
-            let contents = std::fs::read_to_string(&manifest).expect("failed to read manifest");
-            let desired: WorkloadSpec =
-                serde_json::from_str(&contents).expect("invalid workload manifest");
+            let desired = match load_manifest(&manifest) {
+                Ok(desired) => desired,
+                Err(error) => {
+                    eprintln!("Error: {}", error);
+                    std::process::exit(1);
+                }
+            };
             println!("Desired: {:#?}", desired);
             supervise(desired);
         }
+        Commands::Validate { manifest } => match load_manifest(&manifest) {
+            Ok(_) => {
+                println!("Manifest is valid.");
+            }
+            Err(error) => {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        },
     }
 }
 

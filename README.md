@@ -1,63 +1,34 @@
 # Fleet
 
-Fleet is a Rust project for managing applications across a few Linux machines.
-The goal is to describe what should run, where it should run, and how it should
-recover when a process or machine fails.
-
-For example, you could keep an application on a home server with a VPS ready as
-its backup. Fleet aims to handle placement, health checks, and controlled
-handoffs, with explicit configuration for application state.
+Fleet is a Rust tool being built to run apps across multiple computers.
+The goal is simple: describe what you want running, and let Fleet keep it running,
+with another computer ready to take over if needed.
 
 ## What works today
 
-Fleet currently runs on one machine. It reads a JSON manifest, starts the
-requested number of processes, checks them every second, and starts replacements
-when they exit. Finished process handles are removed during each check.
+For now, Fleet runs on one computer. It reads a JSON file, starts the requested
+number of copies of a program, and restarts them when they exit.
 
-Remote deployment, primary/standby recovery, and state transfer are planned.
-Fleet is in early development and is not ready to manage production services.
+Running apps on other computers, switching to backups, and moving data are
+planned. Fleet is not ready for production use.
 
 ## Try it
 
-With a current stable Rust toolchain installed, run from the project directory:
+Install Rust, then run from this folder:
 
 ```sh
 cargo run -- run examples/demo.json
 ```
 
-The demo manifest contains:
+The demo runs `/bin/sleep` for ten seconds, then starts it again. It works on
+macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
 
-```json
-{
-  "name": "demo-service",
-  "program": "/bin/sleep",
-  "args": ["10"],
-  "replicas": 1
-}
-```
+Press Ctrl+C to exit. Automatic cleanup on exit is not connected yet, and stopping
+extra copies is not implemented.
 
-This starts one process that waits ten seconds and exits. Fleet then starts a
-replacement. Change `replicas` before launching Fleet to try multiple copies.
-The demo works on macOS and Linux, where `/bin/sleep` is available.
-
-Press Ctrl+C to exit. Fleet does not yet implement graceful child-process cleanup;
-the demo's sleep processes finish naturally after ten seconds.
-
-## How it works
-
-- A workload specification describes the executable, arguments, and desired count.
-- A process runner launches processes and checks which are still alive.
-- A planner compares the running count with the requested count.
-- A loop carries out start decisions and repeats the check.
-
-The manifest is read once at startup. Stop actions are currently reported but not
-executed, and file, configuration, or process errors can terminate Fleet.
-
-## Development
+## Checks
 
 ```sh
+cargo run -- validate examples/demo.json
 cargo test
-cargo doc --no-deps --document-private-items --open
 ```
-
-The current tests cover the planner's start and stop decisions.

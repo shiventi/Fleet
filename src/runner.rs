@@ -28,7 +28,7 @@ impl ProcessRunner {
         let child = Command::new(&workload.program)
             .args(&workload.args)
             .spawn()
-            .expect("failed to start sleep");
+            .expect("failed to start workload");
 
         println!("Started process: {}", child.id());
 
@@ -51,5 +51,46 @@ impl ProcessRunner {
             }
         });
         self.children.len()
+    }
+
+    pub fn stop_all(&mut self) {
+        for child in &mut self.children {
+            let status = child.try_wait().expect("failed to check process");
+
+            match status {
+                None => {
+                    let _ = child.kill().expect("failed to stop process");
+                }
+                Some(_) => {}
+            }
+
+            let _ = child.wait().expect("failed to wait for process");
+        }
+        self.children.clear();
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stops_all_started_processes() {
+        let workload = WorkloadSpec {
+            name: String::from("test"),
+            replicas: 1,
+            program: String::from("/bin/sleep"),
+            args: vec![String::from("60")],
+        };
+
+        let mut runner = ProcessRunner::new();
+        runner.start(&workload);
+
+        assert_eq!(runner.running_count(), 1);
+
+        runner.stop_all();
+
+        assert_eq!(runner.running_count(), 0);
     }
 }

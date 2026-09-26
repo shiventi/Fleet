@@ -17,4 +17,9 @@ pub enum Commands {
         /// Path to the application manifest.
         manifest: PathBuf,
     },
+    /// Check a manifest without starting any processes.
+    Validate {
+        /// Path to the application manifest.
+        manifest: PathBuf,
+    },
 }
