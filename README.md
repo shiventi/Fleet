@@ -7,12 +7,15 @@ Fleet what to run and which computer should take over if the main one goes down.
 
 ## What works today
 
-So far, it works on one computer. It reads a JSON file, starts the number of
-copies you ask for, and restarts them when they exit. Ctrl+C stops the programs
-it started and exits Fleet.
+- `run` reads a JSON file, starts the requested copies, and restarts them when
+  they exit. Ctrl+C stops its direct child processes.
+- `validate` checks a manifest without starting anything.
+- `agent` listens for TCP requests; `status` reads and displays its JSON reply.
+  The agent loads a manifest but does not run it yet. Status counts are placeholders.
 
-Running apps on other computers, switching to a backup, and moving app data
-are not built yet. Neither is stopping extra copies when fewer are needed.
+Use the agent on localhost only: authentication and connection timeouts are not
+built yet. Remote deployment, failover, data transfer, and stopping extra copies
+are still planned.
 
 ## Try it
 
@@ -24,6 +27,13 @@ cargo run -- run examples/demo.json
 
 The demo runs `/bin/sleep` for ten seconds, then starts it again. It works on
 macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
+
+To try the agent, run these in separate terminals:
+
+```sh
+cargo run -- agent --listen 127.0.0.1:7070 --manifest examples/demo.json
+cargo run -- status --address 127.0.0.1:7070
+```
 
 ## Checks
 

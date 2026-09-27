@@ -1,3 +1,4 @@
+use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use std::path::PathBuf;
@@ -22,4 +23,20 @@ pub enum Commands {
         /// Path to the application manifest.
         manifest: PathBuf,
     },
+
+    /// Listen for status requests without starting the workload yet.
+    Agent {
+        #[arg(long)]
+        listen: String,
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+
+    Status(StatusArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct StatusArgs {
+    #[arg(short, long)]
+    pub address: String,
 }

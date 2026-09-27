@@ -1,15 +1,18 @@
 //! A replica planner and a basic local process supervisor.
 
+mod agent;
 mod cli;
+mod client;
+mod protocol;
 mod runner;
 mod workload;
 
 use clap::Parser;
 use cli::{Cli, Commands};
 use runner::ProcessRunner;
-use workload::WorkloadSpec;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use workload::WorkloadSpec;
 
 /// The reported number of running copies of a workload.
 #[derive(Debug)]
@@ -64,9 +67,8 @@ fn supervise(desired: WorkloadSpec) {
     let keep_alive = Arc::new(AtomicBool::new(true));
     let handler_keep_alive = Arc::clone(&keep_alive);
 
-    ctrlc::set_handler(move || {
-        handler_keep_alive.store(false, Ordering::SeqCst)
-    }).expect("failed to register the ctrl+c handler");
+    ctrlc::set_handler(move || handler_keep_alive.store(false, Ordering::SeqCst))
+        .expect("failed to register the ctrl+c handler");
 
     while keep_alive.load(Ordering::SeqCst) {
         let count = runner.running_count();
@@ -120,6 +122,19 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Agent { listen, manifest } => {
+            let desired = match load_manifest(&manifest) {
+                Ok(workload) => workload,
+                Err(error) => {
+                    eprintln!("Error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = agent::allow_connection(&listen, desired) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
         Commands::Run { manifest } => {
             let desired = match load_manifest(&manifest) {
                 Ok(desired) => desired,
@@ -140,6 +155,19 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        Commands::Status(args) => {
+            println!("Will connect to: {}", args.address);
+
+            match client::status(&args.address) {
+                Ok(()) => {
+                    println!("Connection successful!");
+                }
+                Err(e) => {
+                    eprintln!("Failed to get status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 }
 

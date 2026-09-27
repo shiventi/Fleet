@@ -68,7 +68,6 @@ impl ProcessRunner {
         }
         self.children.clear();
     }
-
 }
 
 #[cfg(test)]
