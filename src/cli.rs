@@ -24,7 +24,7 @@ pub enum Commands {
         manifest: PathBuf,
     },
 
-    /// Listen for status requests without starting the workload yet.
+    /// Run a workload and answer status requests.
     Agent {
         #[arg(long)]
         listen: String,
