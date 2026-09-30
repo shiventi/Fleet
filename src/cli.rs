@@ -33,6 +33,12 @@ pub enum Commands {
     },
 
     Status(StatusArgs),
+
+    /// Stop the workload while keeping the agent running.
+    Stop {
+        #[arg(long)]
+        address: String,
+    },
 }
 
 #[derive(Args, Debug)]

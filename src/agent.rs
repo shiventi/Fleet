@@ -1,4 +1,4 @@
-//! Keeps a workload running and answers TCP status requests.
+//! Keeps a workload running and handles TCP status and stop requests.
 
 use crate::protocol::StatusResponse;
 use crate::runner::ProcessRunner;
@@ -21,7 +21,7 @@ use std::time::Duration;
 ///
 /// # Panics
 /// Panics if a process cannot be started, checked, or stopped, or its count exceeds u32.
-pub fn allow_connection(address: &str, desired: WorkloadSpec) -> io::Result<()> {
+pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<()> {
     let mut runner = ProcessRunner::new();
     let listener = TcpListener::bind(address)?;
     listener.set_nonblocking(true)?;
@@ -56,7 +56,7 @@ pub fn allow_connection(address: &str, desired: WorkloadSpec) -> io::Result<()> 
         match listener.accept() {
             Ok((stream, peer_address)) => {
                 println!("Connected: {}", peer_address);
-                if let Err(e) = handle_client(stream, &desired, &mut runner) {
+                if let Err(e) = handle_client(stream, &mut desired, &mut runner) {
                     eprintln!("error handling client {}: {}", peer_address, e);
                 }
             }
@@ -80,7 +80,7 @@ pub fn allow_connection(address: &str, desired: WorkloadSpec) -> io::Result<()> 
 /// Returns an error if reading, writing, or encoding the reply fails.
 fn handle_client(
     stream: TcpStream,
-    desired: &WorkloadSpec,
+    desired: &mut WorkloadSpec,
     runner: &mut ProcessRunner,
 ) -> io::Result<()> {
     // Use blocking reads with a timeout, regardless of the listener's mode.
@@ -104,6 +104,21 @@ fn handle_client(
             let json = serde_json::to_string(&response)?;
             writer.write_all(json.as_bytes())?;
             // The newline marks the end of the reply for the client's read_line.
+            writer.write_all(b"\n")?;
+        }
+        "stop" => {
+            // Change the target first so the next loop does not restart the workload.
+            desired.replicas = 0;
+            runner.stop_all();
+
+            let response = StatusResponse {
+                workload_name: Some(desired.name.clone()),
+                desired: desired.replicas,
+                running: runner.running_count(),
+            };
+
+            let json = serde_json::to_string(&response)?;
+            writer.write_all(json.as_bytes())?;
             writer.write_all(b"\n")?;
         }
         _ => {

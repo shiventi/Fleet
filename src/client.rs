@@ -1,4 +1,4 @@
-//! Requests status from an agent and prints its reply.
+//! Sends status and stop requests to an agent and prints its replies.
 
 use crate::protocol::StatusResponse;
 use std::io::{self, BufRead, BufReader, Write};
@@ -21,6 +21,28 @@ pub fn status(address: &str) -> io::Result<()> {
         Some(name) => println!("Workload: {}", name),
         None => println!("Workload: none"),
     }
+    println!("Desired copies: {}", status.desired);
+    println!("Running copies: {}", status.running);
+
+    Ok(())
+}
+
+/// Asks the agent to stop its workload and prints the updated counts.
+///
+/// The agent stays running and the manifest file is unchanged.
+///
+/// # Errors
+/// Returns an error if the connection fails or the reply cannot be read or parsed.
+pub fn stop(address: &str) -> io::Result<()> {
+    let mut stream = TcpStream::connect(address)?;
+    stream.write_all(b"stop\n")?;
+
+    let mut response = String::new();
+    let mut reader = BufReader::new(stream);
+
+    reader.read_line(&mut response)?;
+    let status: StatusResponse = serde_json::from_str(&response)?;
+
     println!("Desired copies: {}", status.desired);
     println!("Running copies: {}", status.running);
 

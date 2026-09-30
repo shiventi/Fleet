@@ -168,6 +168,12 @@ fn main() {
                 }
             }
         }
+        Commands::Stop { address } => {
+            if let Err(error) = client::stop(&address) {
+                eprintln!("Failed to stop workload: {}", error);
+                std::process::exit(1);
+            }
+        }
     }
 }
 
