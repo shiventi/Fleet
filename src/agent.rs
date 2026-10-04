@@ -1,6 +1,6 @@
-//! Keeps a workload running and handles TCP status and stop requests.
+//! Manages workload copies and handles JSON commands over TCP.
 
-use crate::protocol::StatusResponse;
+use crate::protocol::{Request, StatusResponse};
 use crate::runner::ProcessRunner;
 use crate::workload::WorkloadSpec;
 use crate::{Action, ObservedWorkload, plan};
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// Restarts missing copies and handles one client at a time.
+/// Adds or removes copies to match the target and handles one client at a time.
 ///
 /// Ctrl+C ends the loop and stops direct child processes.
 /// Client I/O can delay checks; idle reads and writes time out after one second.
@@ -49,7 +49,8 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
                     runner.start(&desired);
                 }
                 Action::Stop { workload_name } => {
-                    println!("Stopping isn't implemented yet for {}", workload_name);
+                    println!("Stopping one copy of {}", workload_name);
+                    runner.stop_one();
                 }
             }
         }
@@ -74,10 +75,10 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
     Ok(())
 }
 
-/// Reads one command and sends a JSON status or a plain-text error.
+/// Reads one JSON command and replies with the current status.
 ///
 /// # Errors
-/// Returns an error if reading, writing, or encoding the reply fails.
+/// Returns an error if reading, parsing, writing, or encoding fails.
 fn handle_client(
     stream: TcpStream,
     desired: &mut WorkloadSpec,
@@ -92,9 +93,10 @@ fn handle_client(
     let mut input = String::new();
 
     reader.read_line(&mut input)?;
+    let request: Request = serde_json::from_str(&input)?;
 
-    match input.trim_end() {
-        "status" => {
+    match request {
+        Request::Status => {
             let response = StatusResponse {
                 workload_name: Some(desired.name.clone()),
                 desired: desired.replicas,
@@ -106,7 +108,7 @@ fn handle_client(
             // The newline marks the end of the reply for the client's read_line.
             writer.write_all(b"\n")?;
         }
-        "stop" => {
+        Request::Stop => {
             // Change the target first so the next loop does not restart the workload.
             desired.replicas = 0;
             runner.stop_all();
@@ -121,8 +123,18 @@ fn handle_client(
             writer.write_all(json.as_bytes())?;
             writer.write_all(b"\n")?;
         }
-        _ => {
-            writer.write_all(b"error: unknown command\n")?;
+        Request::Scale { replicas } => {
+            // The next supervisor loop brings the running count to this target.
+            desired.replicas = replicas;
+            let response = StatusResponse {
+                workload_name: Some(desired.name.clone()),
+                desired: desired.replicas,
+                running: runner.running_count(),
+            };
+
+            let json = serde_json::to_string(&response)?;
+            writer.write_all(json.as_bytes())?;
+            writer.write_all(b"\n")?;
         }
     }
 

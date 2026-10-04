@@ -12,3 +12,15 @@ pub struct StatusResponse {
     /// The number of copies observed running.
     pub running: usize,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+/// A client command, sent as JSON followed by a newline.
+pub enum Request {
+    /// Ask for the current workload and counts.
+    Status,
+    /// Set the target to zero and stop all copies.
+    Stop,
+    /// Change the target; the agent adjusts processes on its next loop.
+    Scale { replicas: u32 },
+}

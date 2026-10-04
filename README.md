@@ -14,10 +14,12 @@ Fleet what to run and which computer should take over if the main one goes down.
   and real process counts over TCP. Ctrl+C stops the agent's direct child processes.
 - `stop` stops the workload without closing the agent. It sets the desired count
   to zero in memory; restarting the agent reloads the unchanged manifest.
+- `scale` changes the copy count while the agent runs, including starting again
+  after `stop`. The agent adds or removes copies to match the new target.
 
 Use the agent on localhost only: there is no authentication yet. It handles one
-client at a time, with idle connection timeouts. Remote deployment, failover, data transfer, and stopping extra copies
-are still planned.
+client at a time, with idle connection timeouts. Remote deployment, failover,
+and data transfer are still planned.
 
 ## Try it
 
@@ -35,6 +37,7 @@ To try the agent, run these in separate terminals:
 ```sh
 cargo run -- agent --listen 127.0.0.1:7070 --manifest examples/demo.json
 cargo run -- status --address 127.0.0.1:7070
+cargo run -- scale --replicas 3 --address 127.0.0.1:7070
 cargo run -- stop --address 127.0.0.1:7070
 ```
 

@@ -68,11 +68,42 @@ impl ProcessRunner {
         }
         self.children.clear();
     }
+
+    /// Force-stops one tracked process and collects its exit status.
+    /// Does nothing when no handles remain.
+    ///
+    /// # Panics
+    /// Panics if stopping or waiting for the process fails.
+    pub fn stop_one(&mut self) {
+        if let Some(mut child) = self.children.pop() {
+            child.kill().expect("failed to stop process");
+            child.wait().expect("failed to wait for process");
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stops_one_copy_and_handles_an_empty_runner() {
+        let workload = WorkloadSpec {
+            name: String::from("test"),
+            replicas: 2,
+            program: String::from("/bin/sleep"),
+            args: vec![String::from("60")],
+        };
+        let mut runner = ProcessRunner::new();
+        runner.start(&workload);
+        runner.start(&workload);
+        runner.stop_one();
+        let remaining = runner.running_count();
+        runner.stop_all();
+        assert_eq!(remaining, 1);
+        runner.stop_one();
+        assert_eq!(runner.running_count(), 0);
+    }
 
     #[test]
     fn stops_all_started_processes() {

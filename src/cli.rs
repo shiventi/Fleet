@@ -39,6 +39,14 @@ pub enum Commands {
         #[arg(long)]
         address: String,
     },
+
+    /// Change the number of copies managed by the agent.
+    Scale {
+        #[arg(long)]
+        replicas: u32,
+        #[arg(long)]
+        address: String,
+    },
 }
 
 #[derive(Args, Debug)]

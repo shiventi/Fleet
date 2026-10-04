@@ -174,6 +174,13 @@ fn main() {
                 std::process::exit(1);
             }
         }
+
+        Commands::Scale { address, replicas } => {
+            if let Err(error) = client::scale(&address, replicas) {
+                eprintln!("Failed to scale workload: {}", error);
+                std::process::exit(1);
+            }
+        }
     }
 }
 
