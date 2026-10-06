@@ -1,8 +1,8 @@
 //! Manages workload copies and handles JSON commands over TCP.
 
-use crate::protocol::{Request, StatusResponse};
+use crate::protocol::{Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
-use crate::workload::WorkloadSpec;
+use crate::workload::{MAX_REPLICAS, WorkloadSpec};
 use crate::{Action, ObservedWorkload, plan};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -75,10 +75,23 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
     Ok(())
 }
 
-/// Reads one JSON command and replies with the current status.
+/// Sends one JSON reply followed by a newline.
 ///
 /// # Errors
-/// Returns an error if reading, parsing, writing, or encoding fails.
+/// Returns an error if encoding or writing fails.
+fn send_reply(mut writer: &TcpStream, reply: &Response) -> io::Result<()> {
+    let json = serde_json::to_string(reply)?;
+    writer.write_all(json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Reads one JSON command and replies with status or an error message.
+///
+/// # Errors
+/// Returns an error if reading, writing, or encoding fails.
+/// Invalid commands receive an error reply without changing the workload.
 fn handle_client(
     stream: TcpStream,
     desired: &mut WorkloadSpec,
@@ -89,11 +102,18 @@ fn handle_client(
     stream.set_read_timeout(Some(Duration::from_secs(1)))?;
     stream.set_write_timeout(Some(Duration::from_secs(1)))?;
     let mut reader = BufReader::new(&stream);
-    let mut writer = &stream;
     let mut input = String::new();
 
     reader.read_line(&mut input)?;
-    let request: Request = serde_json::from_str(&input)?;
+    let request = match serde_json::from_str::<Request>(&input) {
+        Ok(request) => request,
+        Err(error) => {
+            let reply = Response::Error {
+                message: format!("Invalid request: {}", error),
+            };
+            return send_reply(&stream, &reply);
+        }
+    };
 
     match request {
         Request::Status => {
@@ -103,10 +123,8 @@ fn handle_client(
                 running: runner.running_count(),
             };
 
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes())?;
-            // The newline marks the end of the reply for the client's read_line.
-            writer.write_all(b"\n")?;
+            let reply = Response::Status { status: response };
+            send_reply(&stream, &reply)?;
         }
         Request::Stop => {
             // Change the target first so the next loop does not restart the workload.
@@ -119,11 +137,17 @@ fn handle_client(
                 running: runner.running_count(),
             };
 
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes())?;
-            writer.write_all(b"\n")?;
+            let reply = Response::Status { status: response };
+            send_reply(&stream, &reply)?;
         }
         Request::Scale { replicas } => {
+            // Reject the request before changing the agent's target.
+            if replicas > MAX_REPLICAS {
+                let reply = Response::Error {
+                    message: format!("Replica count cannot exceed {}", MAX_REPLICAS),
+                };
+                return send_reply(&stream, &reply);
+            }
             // The next supervisor loop brings the running count to this target.
             desired.replicas = replicas;
             let response = StatusResponse {
@@ -132,12 +156,10 @@ fn handle_client(
                 running: runner.running_count(),
             };
 
-            let json = serde_json::to_string(&response)?;
-            writer.write_all(json.as_bytes())?;
-            writer.write_all(b"\n")?;
+            let reply = Response::Status { status: response };
+            send_reply(&stream, &reply)?;
         }
     }
 
-    writer.flush()?;
     Ok(())
 }

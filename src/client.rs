@@ -1,6 +1,6 @@
 //! Sends JSON commands to an agent and prints its replies.
 
-use crate::protocol::{Request, StatusResponse};
+use crate::protocol::{Request, Response};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::TcpStream;
 
@@ -19,13 +19,21 @@ pub fn status(address: &str) -> io::Result<()> {
     let mut reader = BufReader::new(stream);
 
     reader.read_line(&mut response)?;
-    let status: StatusResponse = serde_json::from_str(&response)?;
-    match status.workload_name {
-        Some(name) => println!("Workload: {}", name),
-        None => println!("Workload: none"),
+    let reply: Response = serde_json::from_str(&response)?;
+
+    match reply {
+        Response::Status { status } => {
+            match status.workload_name {
+                Some(name) => println!("Workload: {}", name),
+                None => println!("Workload: none"),
+            }
+            println!("Desired copies: {}", status.desired);
+            println!("Running copies: {}", status.running);
+        }
+        Response::Error { message } => {
+            return Err(io::Error::other(message));
+        }
     }
-    println!("Desired copies: {}", status.desired);
-    println!("Running copies: {}", status.running);
 
     Ok(())
 }
@@ -47,10 +55,16 @@ pub fn stop(address: &str) -> io::Result<()> {
     let mut reader = BufReader::new(stream);
 
     reader.read_line(&mut response)?;
-    let status: StatusResponse = serde_json::from_str(&response)?;
-
-    println!("Desired copies: {}", status.desired);
-    println!("Running copies: {}", status.running);
+    let reply: Response = serde_json::from_str(&response)?;
+    match reply {
+        Response::Status { status } => {
+            println!("Desired copies: {}", status.desired);
+            println!("Running copies: {}", status.running);
+        }
+        Response::Error { message } => {
+            return Err(io::Error::other(message));
+        }
+    }
 
     Ok(())
 }
@@ -72,10 +86,16 @@ pub fn scale(address: &str, replicas: u32) -> io::Result<()> {
     let mut reader = BufReader::new(stream);
     reader.read_line(&mut response)?;
 
-    let status: StatusResponse = serde_json::from_str(&response)?;
-
-    println!("Desired copies: {}", status.desired);
-    println!("Running copies: {}", status.running);
+    let reply: Response = serde_json::from_str(&response)?;
+    match reply {
+        Response::Status { status } => {
+            println!("Desired copies: {}", status.desired);
+            println!("Running copies: {}", status.running);
+        }
+        Response::Error { message } => {
+            return Err(io::Error::other(message));
+        }
+    }
 
     Ok(())
 }

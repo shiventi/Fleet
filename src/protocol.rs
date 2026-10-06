@@ -24,3 +24,12 @@ pub enum Request {
     /// Change the target; the agent adjusts processes on its next loop.
     Scale { replicas: u32 },
 }
+
+/// An agent reply: current status or a reason the request was rejected.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Response {
+    /// The workload and current counts.
+    Status { status: StatusResponse },
+    /// A readable error message.
+    Error { message: String },
+}
