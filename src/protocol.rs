@@ -1,4 +1,7 @@
-//! Shared types for messages between the client and agent.
+//! Shared types for JSON messages between the client and agent.
+//!
+//! Requests include a shared token. Each message ends with a newline.
+//! TCP does not encrypt the token; remote connections need an encrypted tunnel.
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +18,7 @@ pub struct StatusResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
-/// A client command, sent as JSON followed by a newline.
+/// A client command carried inside an authenticated request.
 pub enum Request {
     /// Ask for the current workload and counts.
     Status,
@@ -32,4 +35,15 @@ pub enum Response {
     Status { status: StatusResponse },
     /// A readable error message.
     Error { message: String },
+}
+
+/// A command and the shared token needed to run it.
+///
+/// Debug printing is not derived to avoid accidentally logging the token.
+#[derive(Serialize, Deserialize)]
+pub struct AuthenticatedRequest {
+    /// The secret read from `FLEET_TOKEN`. Do not log it.
+    pub token: String,
+    /// The command to handle after checking the token.
+    pub request: Request,
 }

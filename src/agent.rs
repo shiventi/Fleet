@@ -1,6 +1,6 @@
-//! Manages workload copies and handles JSON commands over TCP.
+//! Manages workload copies and handles token-authenticated JSON commands over TCP.
 
-use crate::protocol::{Request, Response, StatusResponse};
+use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
 use crate::workload::{MAX_REPLICAS, WorkloadSpec};
 use crate::{Action, ObservedWorkload, plan};
@@ -14,14 +14,24 @@ use std::time::Duration;
 ///
 /// Ctrl+C ends the loop and stops direct child processes.
 /// Client I/O can delay checks; idle reads and writes time out after one second.
+/// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
+/// Keep the listener on localhost; the token does not encrypt traffic.
 ///
 /// # Errors
-/// Returns an error if the listener or Ctrl+C handler cannot be set up.
+/// Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
+/// or if the listener or Ctrl+C handler cannot be set up.
 /// Later connection errors are logged and the loop continues.
 ///
 /// # Panics
 /// Panics if a process cannot be started, checked, or stopped, or its count exceeds u32.
 pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<()> {
+    let expected_token = std::env::var("FLEET_TOKEN")
+        .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
+
+    if expected_token.trim().is_empty() {
+        return Err(io::Error::other("Your FLEET_TOKEN is blank"));
+    }
+
     let mut runner = ProcessRunner::new();
     let listener = TcpListener::bind(address)?;
     listener.set_nonblocking(true)?;
@@ -57,7 +67,7 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
         match listener.accept() {
             Ok((stream, peer_address)) => {
                 println!("Connected: {}", peer_address);
-                if let Err(e) = handle_client(stream, &mut desired, &mut runner) {
+                if let Err(e) = handle_client(stream, &mut desired, &mut runner, &expected_token) {
                     eprintln!("error handling client {}: {}", peer_address, e);
                 }
             }
@@ -87,15 +97,16 @@ fn send_reply(mut writer: &TcpStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
-/// Reads one JSON command and replies with status or an error message.
+/// Checks the request's token before handling its command.
 ///
 /// # Errors
 /// Returns an error if reading, writing, or encoding fails.
-/// Invalid commands receive an error reply without changing the workload.
+/// Invalid requests or wrong tokens receive an error reply without changing the workload.
 fn handle_client(
     stream: TcpStream,
     desired: &mut WorkloadSpec,
     runner: &mut ProcessRunner,
+    expected_token: &str,
 ) -> io::Result<()> {
     // Use blocking reads with a timeout, regardless of the listener's mode.
     stream.set_nonblocking(false)?;
@@ -105,7 +116,7 @@ fn handle_client(
     let mut input = String::new();
 
     reader.read_line(&mut input)?;
-    let request = match serde_json::from_str::<Request>(&input) {
+    let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,
         Err(error) => {
             let reply = Response::Error {
@@ -115,7 +126,14 @@ fn handle_client(
         }
     };
 
-    match request {
+    if authenticated.token != expected_token {
+        let reply = Response::Error {
+            message: String::from("Authentication failed"),
+        };
+        return send_reply(&stream, &reply);
+    }
+
+    match authenticated.request {
         Request::Status => {
             let response = StatusResponse {
                 workload_name: Some(desired.name.clone()),
