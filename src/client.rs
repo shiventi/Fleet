@@ -1,25 +1,25 @@
-//! Sends token-authenticated JSON commands to an agent and prints its replies.
+//! Sends JSON commands over mutual TLS and prints the agent's replies.
 //!
 //! Reads `FLEET_TOKEN` before connecting. It must match the agent's token.
-//! Use localhost or an encrypted tunnel; TCP sends the token without encryption.
+//! Both sides verify certificates before any command or token is sent.
 
 use crate::protocol::{AuthenticatedRequest, Request, Response};
-use std::io::{self, BufRead, BufReader, Write};
-use std::net::TcpStream;
+use crate::tls::{self, TlsFiles};
+use std::io::{self, Write};
 
 /// Connects to an agent and displays its workload and process counts.
 ///
 /// # Errors
 /// Returns an error if the token is missing or invalid, connecting, sending,
 /// reading, or parsing fails, or the agent rejects the request.
-pub fn status(address: &str) -> io::Result<()> {
+pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
     if token.trim().is_empty() {
         return Err(io::Error::other("Your FLEET_TOKEN is blank"));
     }
-    let mut stream = TcpStream::connect(address)?;
+    let mut stream = tls::connect(address, server_name, files)?;
     let request = AuthenticatedRequest {
         token,
         request: Request::Status,
@@ -28,10 +28,8 @@ pub fn status(address: &str) -> io::Result<()> {
     stream.write_all(json.as_bytes())?;
     stream.write_all(b"\n")?;
 
-    let mut response = String::new();
-    let mut reader = BufReader::new(stream);
-
-    reader.read_line(&mut response)?;
+    stream.flush()?;
+    let response = tls::read_message(&mut stream)?;
     let reply: Response = serde_json::from_str(&response)?;
 
     match reply {
@@ -58,14 +56,14 @@ pub fn status(address: &str) -> io::Result<()> {
 /// # Errors
 /// Returns an error if the token is missing or invalid, connecting, sending,
 /// reading, or parsing fails, or the agent rejects the request.
-pub fn stop(address: &str) -> io::Result<()> {
+pub fn stop(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
     if token.trim().is_empty() {
         return Err(io::Error::other("Your FLEET_TOKEN is blank"));
     }
-    let mut stream = TcpStream::connect(address)?;
+    let mut stream = tls::connect(address, server_name, files)?;
     let request = AuthenticatedRequest {
         token,
         request: Request::Stop,
@@ -74,10 +72,8 @@ pub fn stop(address: &str) -> io::Result<()> {
     stream.write_all(json.as_bytes())?;
     stream.write_all(b"\n")?;
 
-    let mut response = String::new();
-    let mut reader = BufReader::new(stream);
-
-    reader.read_line(&mut response)?;
+    stream.flush()?;
+    let response = tls::read_message(&mut stream)?;
     let reply: Response = serde_json::from_str(&response)?;
     match reply {
         Response::Status { status } => {
@@ -98,14 +94,14 @@ pub fn stop(address: &str) -> io::Result<()> {
 /// # Errors
 /// Returns an error if the token is missing or invalid, connecting, sending,
 /// reading, or parsing fails, or the agent rejects the request.
-pub fn scale(address: &str, replicas: u32) -> io::Result<()> {
+pub fn scale(address: &str, replicas: u32, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
     if token.trim().is_empty() {
         return Err(io::Error::other("Your FLEET_TOKEN is blank"));
     }
-    let mut stream = TcpStream::connect(address)?;
+    let mut stream = tls::connect(address, server_name, files)?;
     let request = AuthenticatedRequest {
         token,
         request: Request::Scale { replicas },
@@ -115,9 +111,8 @@ pub fn scale(address: &str, replicas: u32) -> io::Result<()> {
     stream.write_all(json.as_bytes())?;
     stream.write_all(b"\n")?;
 
-    let mut response = String::new();
-    let mut reader = BufReader::new(stream);
-    reader.read_line(&mut response)?;
+    stream.flush()?;
+    let response = tls::read_message(&mut stream)?;
 
     let reply: Response = serde_json::from_str(&response)?;
     match reply {

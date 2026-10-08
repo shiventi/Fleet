@@ -1,7 +1,7 @@
 //! Shared types for JSON messages between the client and agent.
 //!
 //! Requests include a shared token. Each message ends with a newline.
-//! TCP does not encrypt the token; remote connections need an encrypted tunnel.
+//! Messages are carried over mutual TLS, which encrypts the token and commands.
 
 use serde::{Deserialize, Serialize};
 

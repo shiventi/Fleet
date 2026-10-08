@@ -5,6 +5,7 @@ mod cli;
 mod client;
 mod protocol;
 mod runner;
+mod tls;
 mod workload;
 
 use clap::Parser;
@@ -122,7 +123,11 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Agent { listen, manifest } => {
+        Commands::Agent {
+            listen,
+            manifest,
+            tls,
+        } => {
             let desired = match load_manifest(&manifest) {
                 Ok(workload) => workload,
                 Err(error) => {
@@ -130,7 +135,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if let Err(error) = agent::allow_connection(&listen, desired) {
+            if let Err(error) = agent::allow_connection(&listen, desired, &tls) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
@@ -158,7 +163,7 @@ fn main() {
         Commands::Status(args) => {
             println!("Will connect to: {}", args.address);
 
-            match client::status(&args.address) {
+            match client::status(&args.address, &args.server_name, &args.tls) {
                 Ok(()) => {
                     println!("Connection successful!");
                 }
@@ -168,15 +173,24 @@ fn main() {
                 }
             }
         }
-        Commands::Stop { address } => {
-            if let Err(error) = client::stop(&address) {
+        Commands::Stop {
+            address,
+            server_name,
+            tls,
+        } => {
+            if let Err(error) = client::stop(&address, &server_name, &tls) {
                 eprintln!("Failed to stop workload: {}", error);
                 std::process::exit(1);
             }
         }
 
-        Commands::Scale { address, replicas } => {
-            if let Err(error) = client::scale(&address, replicas) {
+        Commands::Scale {
+            address,
+            replicas,
+            server_name,
+            tls,
+        } => {
+            if let Err(error) = client::scale(&address, replicas, &server_name, &tls) {
                 eprintln!("Failed to scale workload: {}", error);
                 std::process::exit(1);
             }

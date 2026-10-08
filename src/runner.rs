@@ -21,12 +21,14 @@ impl ProcessRunner {
     }
 
     /// Starts one copy of the workload and stores its process handle.
+    /// The child does not inherit Fleet's control token.
     ///
     /// # Panics
     /// Panics if the program cannot be launched.
     pub fn start(&mut self, workload: &WorkloadSpec) {
         let child = Command::new(&workload.program)
             .args(&workload.args)
+            .env_remove("FLEET_TOKEN")
             .spawn()
             .expect("failed to start workload");
 

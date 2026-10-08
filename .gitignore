@@ -34,6 +34,12 @@
 /.cargo/credentials.toml
 *.key
 *-key.pem
+*.pem
+*.der
+*.crt
+*.cer
+*.csr
+*.srl
 *.p12
 *.pfx
 

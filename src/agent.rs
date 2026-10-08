@@ -1,30 +1,35 @@
-//! Manages workload copies and handles token-authenticated JSON commands over TCP.
+//! Manages workload copies and handles commands over mutual TLS.
 
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
+use crate::tls::{self, ServerStream, TlsFiles};
 use crate::workload::{MAX_REPLICAS, WorkloadSpec};
 use crate::{Action, ObservedWorkload, plan};
-use std::io::{self, BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::{self, Write};
+use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use subtle::ConstantTimeEq;
 
 /// Adds or removes copies to match the target and handles one client at a time.
 ///
 /// Ctrl+C ends the loop and stops direct child processes.
-/// Client I/O can delay checks; idle reads and writes time out after one second.
+/// Client I/O can delay checks for up to five seconds per connection.
 /// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
-/// Keep the listener on localhost; the token does not encrypt traffic.
+/// Requires a trusted client certificate and keeps the listener on localhost.
 ///
 /// # Errors
 /// Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
-/// or if the listener or Ctrl+C handler cannot be set up.
+/// TLS files are invalid, or the listener or Ctrl+C handler cannot be set up.
 /// Later connection errors are logged and the loop continues.
 ///
 /// # Panics
 /// Panics if a process cannot be started, checked, or stopped, or its count exceeds u32.
-pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<()> {
+pub fn allow_connection(
+    address: &str,
+    mut desired: WorkloadSpec,
+    files: &TlsFiles,
+) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -32,8 +37,17 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
         return Err(io::Error::other("Your FLEET_TOKEN is blank"));
     }
 
+    let listen_address: std::net::SocketAddr = address.parse().map_err(io::Error::other)?;
+
+    if !listen_address.ip().is_loopback() {
+        return Err(io::Error::other(
+            "This prototype requires a localhost address",
+        ));
+    }
+
+    let config = Arc::new(tls::server_config(files)?);
     let mut runner = ProcessRunner::new();
-    let listener = TcpListener::bind(address)?;
+    let listener = TcpListener::bind(listen_address)?;
     listener.set_nonblocking(true)?;
     let keep_alive = Arc::new(AtomicBool::new(true));
     let handler_keep_alive = Arc::clone(&keep_alive);
@@ -67,7 +81,14 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
         match listener.accept() {
             Ok((stream, peer_address)) => {
                 println!("Connected: {}", peer_address);
-                if let Err(e) = handle_client(stream, &mut desired, &mut runner, &expected_token) {
+                let result = tls::accept(stream, Arc::clone(&config)).and_then(|mut stream| {
+                    let result =
+                        handle_client(&mut stream, &mut desired, &mut runner, &expected_token);
+                    stream.conn.send_close_notify();
+                    let _ = stream.flush();
+                    result
+                });
+                if let Err(e) = result {
                     eprintln!("error handling client {}: {}", peer_address, e);
                 }
             }
@@ -89,7 +110,7 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec) -> io::Result<
 ///
 /// # Errors
 /// Returns an error if encoding or writing fails.
-fn send_reply(mut writer: &TcpStream, reply: &Response) -> io::Result<()> {
+fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     let json = serde_json::to_string(reply)?;
     writer.write_all(json.as_bytes())?;
     writer.write_all(b"\n")?;
@@ -103,34 +124,33 @@ fn send_reply(mut writer: &TcpStream, reply: &Response) -> io::Result<()> {
 /// Returns an error if reading, writing, or encoding fails.
 /// Invalid requests or wrong tokens receive an error reply without changing the workload.
 fn handle_client(
-    stream: TcpStream,
+    stream: &mut ServerStream,
     desired: &mut WorkloadSpec,
     runner: &mut ProcessRunner,
     expected_token: &str,
 ) -> io::Result<()> {
-    // Use blocking reads with a timeout, regardless of the listener's mode.
-    stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
-    let mut reader = BufReader::new(&stream);
-    let mut input = String::new();
-
-    reader.read_line(&mut input)?;
+    let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,
-        Err(error) => {
+        Err(_) => {
             let reply = Response::Error {
-                message: format!("Invalid request: {}", error),
+                message: String::from("Invalid request"),
             };
-            return send_reply(&stream, &reply);
+            return send_reply(stream, &reply);
         }
     };
 
-    if authenticated.token != expected_token {
+    if authenticated
+        .token
+        .as_bytes()
+        .ct_eq(expected_token.as_bytes())
+        .unwrap_u8()
+        == 0
+    {
         let reply = Response::Error {
             message: String::from("Authentication failed"),
         };
-        return send_reply(&stream, &reply);
+        return send_reply(stream, &reply);
     }
 
     match authenticated.request {
@@ -142,7 +162,7 @@ fn handle_client(
             };
 
             let reply = Response::Status { status: response };
-            send_reply(&stream, &reply)?;
+            send_reply(stream, &reply)?;
         }
         Request::Stop => {
             // Change the target first so the next loop does not restart the workload.
@@ -156,7 +176,7 @@ fn handle_client(
             };
 
             let reply = Response::Status { status: response };
-            send_reply(&stream, &reply)?;
+            send_reply(stream, &reply)?;
         }
         Request::Scale { replicas } => {
             // Reject the request before changing the agent's target.
@@ -164,7 +184,7 @@ fn handle_client(
                 let reply = Response::Error {
                     message: format!("Replica count cannot exceed {}", MAX_REPLICAS),
                 };
-                return send_reply(&stream, &reply);
+                return send_reply(stream, &reply);
             }
             // The next supervisor loop brings the running count to this target.
             desired.replicas = replicas;
@@ -175,7 +195,7 @@ fn handle_client(
             };
 
             let reply = Response::Status { status: response };
-            send_reply(&stream, &reply)?;
+            send_reply(stream, &reply)?;
         }
     }
 
