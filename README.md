@@ -95,6 +95,8 @@ cargo run -- watch --manifest examples/cluster.json \
 
 Checks run in batches of up to four, with a two-second pause after each round.
 Before polling, Fleet checks the cluster entries, token, and local TLS files.
+The watcher loads credentials once and shares them across checks. Each check
+opens a new connection; restart the watcher after changing credentials.
 Each node needs a name, certificate name, and numeric IP with a nonzero port;
 wildcard IPs are not allowed. Agents still verify credentials when connecting.
 Results print as checks finish. A slow check delays the next batch, not other

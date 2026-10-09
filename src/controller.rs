@@ -28,26 +28,22 @@ pub struct ClusterSpec {
 /// Failed checks are printed without ending the loop. Each batch runs its checks
 /// together and finishes before the next batch starts. Ctrl+C ends this watcher,
 /// not the agents or their workloads.
+/// One client shares the loaded token and TLS config across all checks.
+/// Restart the watcher to load changed credentials. Each check opens a new connection.
 /// This function does not start, stop, or move workloads.
 ///
 /// # Errors
 /// Returns an error before polling if the token is missing or blank, or the local
 /// TLS files cannot be loaded. Agents check the token and certificates on connection.
 pub fn watch(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
-    let token = std::env::var("FLEET_TOKEN")
-        .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
-
-    if token.trim().is_empty() {
-        return Err(io::Error::other("Your FLEET_TOKEN is blank"));
-    }
-
-    crate::tls::client_config(files)?;
+    let client = client::FleetClient::new(files)?;
 
     loop {
         for batch in cluster.nodes.chunks(4) {
             std::thread::scope(|scope| {
+                let client = &client;
                 for node in batch {
-                    scope.spawn(move || check_node(node, files));
+                    scope.spawn(move || check_node(node, client));
                 }
             });
         }
@@ -56,8 +52,8 @@ pub fn watch(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
 }
 
 /// Checks one agent and prints its counts or an error.
-pub fn check_node(node: &NodeSpec, files: &TlsFiles) {
-    match client::fetch_status(&node.address, &node.server_name, files) {
+pub fn check_node(node: &NodeSpec, client: &client::FleetClient) {
+    match client.fetch_status(&node.address, &node.server_name) {
         Ok(status) => println!(
             "{}: running {}, desired {}",
             node.name, status.running, status.desired
