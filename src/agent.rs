@@ -16,7 +16,8 @@ use subtle::ConstantTimeEq;
 /// Ctrl+C ends the loop and stops direct child processes.
 /// Client I/O can delay checks for up to five seconds per connection.
 /// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
-/// Requires a trusted client certificate and keeps the listener on localhost.
+/// Requires a trusted client certificate. Remote addresses need `allow_remote`.
+/// Wildcard addresses such as `0.0.0.0` and `::` are rejected.
 ///
 /// # Errors
 /// Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
@@ -29,6 +30,7 @@ pub fn allow_connection(
     address: &str,
     mut desired: WorkloadSpec,
     files: &TlsFiles,
+    allow_remote: bool,
 ) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
@@ -39,10 +41,14 @@ pub fn allow_connection(
 
     let listen_address: std::net::SocketAddr = address.parse().map_err(io::Error::other)?;
 
-    if !listen_address.ip().is_loopback() {
+    if listen_address.ip().is_unspecified() {
         return Err(io::Error::other(
-            "This prototype requires a localhost address",
+            "Please use a specific IP address, not 0.0.0.0 or ::",
         ));
+    }
+
+    if !listen_address.ip().is_loopback() && !allow_remote {
+        return Err(io::Error::other("Remote addresses require --allow-remote"));
     }
 
     let config = Arc::new(tls::server_config(files)?);

@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {
+      "name": "local-one",
+      "address": "127.0.0.1:7070",
+      "server_name": "localhost"
+    },
+    {
+      "name": "local-two",
+      "address": "127.0.0.1:7071",
+      "server_name": "localhost"
+    }
+  ]
+}

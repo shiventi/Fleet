@@ -1,8 +1,9 @@
-//! A replica planner and a basic local process supervisor.
+//! Runs workloads, controls agents, and watches their status.
 
 mod agent;
 mod cli;
 mod client;
+mod controller;
 mod protocol;
 mod runner;
 mod tls;
@@ -10,6 +11,7 @@ mod workload;
 
 use clap::Parser;
 use cli::{Cli, Commands};
+use controller::ClusterSpec;
 use runner::ProcessRunner;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +31,7 @@ struct ObservedWorkload {
 enum Action {
     /// Requests one additional copy of the named workload.
     Start { workload_name: String },
-    /// Requests one fewer copy; execution is not implemented yet.
+    /// Requests one fewer running copy.
     Stop { workload_name: String },
 }
 
@@ -120,6 +122,19 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
     Ok(desired)
 }
 
+/// Reads a cluster JSON file without contacting its agents.
+///
+/// # Errors
+/// Returns an error if reading or parsing the file fails.
+fn load_cluster(path: &std::path::Path) -> Result<ClusterSpec, String> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|err| format!("Failed to read cluster file: {}", err))?;
+    let cluster: ClusterSpec =
+        serde_json::from_str(&contents).map_err(|err| format!("Invalid cluster JSON: {}", err))?;
+
+    Ok(cluster)
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -127,6 +142,7 @@ fn main() {
             listen,
             manifest,
             tls,
+            allow_remote,
         } => {
             let desired = match load_manifest(&manifest) {
                 Ok(workload) => workload,
@@ -135,7 +151,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if let Err(error) = agent::allow_connection(&listen, desired, &tls) {
+            if let Err(error) = agent::allow_connection(&listen, desired, &tls, allow_remote) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
@@ -194,6 +210,17 @@ fn main() {
                 eprintln!("Failed to scale workload: {}", error);
                 std::process::exit(1);
             }
+        }
+
+        Commands::Watch { manifest, tls } => {
+            let cluster = match load_cluster(&manifest) {
+                Ok(cluster) => cluster,
+                Err(error) => {
+                    eprintln!("Cluster error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            controller::watch(&cluster, &tls);
         }
     }
 }

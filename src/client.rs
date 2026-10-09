@@ -3,16 +3,20 @@
 //! Reads `FLEET_TOKEN` before connecting. It must match the agent's token.
 //! Both sides verify certificates before any command or token is sent.
 
-use crate::protocol::{AuthenticatedRequest, Request, Response};
+use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::tls::{self, TlsFiles};
 use std::io::{self, Write};
 
-/// Connects to an agent and displays its workload and process counts.
+/// Gets the agent's status without printing it.
 ///
 /// # Errors
 /// Returns an error if the token is missing or invalid, connecting, sending,
 /// reading, or parsing fails, or the agent rejects the request.
-pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
+pub fn fetch_status(
+    address: &str,
+    server_name: &str,
+    files: &TlsFiles,
+) -> io::Result<StatusResponse> {
     let token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -33,18 +37,24 @@ pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<
     let reply: Response = serde_json::from_str(&response)?;
 
     match reply {
-        Response::Status { status } => {
-            match status.workload_name {
-                Some(name) => println!("Workload: {}", name),
-                None => println!("Workload: none"),
-            }
-            println!("Desired copies: {}", status.desired);
-            println!("Running copies: {}", status.running);
-        }
-        Response::Error { message } => {
-            return Err(io::Error::other(message));
-        }
+        Response::Status { status } => Ok(status),
+        Response::Error { message } => Err(io::Error::other(message)),
     }
+}
+
+/// Gets the agent's status and prints its name and copy counts.
+///
+/// # Errors
+/// Returns an error if fetching the status fails.
+pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
+    let status = fetch_status(address, server_name, files)?;
+
+    match status.workload_name {
+        Some(name) => println!("Workload: {}", name),
+        None => println!("Workload: none"),
+    }
+    println!("Desired copies: {}", status.desired);
+    println!("Running copies: {}", status.running);
 
     Ok(())
 }

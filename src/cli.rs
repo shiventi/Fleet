@@ -33,6 +33,9 @@ pub enum Commands {
         manifest: PathBuf,
         #[command(flatten)]
         tls: TlsFiles,
+        /// Allow binding to a specific remote IP; use a private network.
+        #[arg(long)]
+        allow_remote: bool,
     },
 
     /// Show a workload's current counts over mutual TLS.
@@ -58,6 +61,14 @@ pub enum Commands {
         /// Expected name in the agent's certificate, not its connection address.
         #[arg(long, default_value = "localhost")]
         server_name: String,
+        #[command(flatten)]
+        tls: TlsFiles,
+    },
+
+    /// Keep checking the agents listed in a cluster file.
+    Watch {
+        #[arg(long)]
+        manifest: PathBuf,
         #[command(flatten)]
         tls: TlsFiles,
     },

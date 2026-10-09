@@ -1,9 +1,16 @@
 #!/bin/sh
-# Creates local demo identities. Never use this CA for production.
+# Creates demo identities. Never use this CA for production.
 set -eu
 umask 077
 
 dir=${1:-"$HOME/.config/fleet/dev-tls"}
+server_name=${2:-localhost}
+case "$server_name" in
+    *[!a-zA-Z0-9.-]*)
+        printf '%s\n' 'Use a simple DNS name for the server certificate.' >&2
+        exit 1
+        ;;
+esac
 mkdir -p "$(dirname "$dir")"
 if ! mkdir "$dir"; then
     printf '%s\n' 'Use a new directory; existing keys will not be overwritten.' >&2
@@ -24,7 +31,7 @@ for name in server client; do
         'keyUsage=critical,digitalSignature' > "$dir/$name.ext"
     if [ "$name" = server ]; then
         printf '%s\n' 'extendedKeyUsage=serverAuth' \
-            'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1' >> "$dir/$name.ext"
+            "subjectAltName=DNS:$server_name,IP:127.0.0.1,IP:::1" >> "$dir/$name.ext"
     else
         printf '%s\n' 'extendedKeyUsage=clientAuth' >> "$dir/$name.ext"
     fi
