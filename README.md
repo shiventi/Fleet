@@ -93,8 +93,12 @@ cargo run -- watch --manifest examples/cluster.json \
   --ca-cert "$TLS/ca.crt" --cert "$TLS/client.crt" --private-key "$TLS/client.key"
 ```
 
-Checks run one at a time, with a two-second pause after each round. Slow checks
-delay later nodes. Ctrl+C stops only the watcher. It does not move workloads;
+Checks run in batches of up to four, with a two-second pause after each round.
+Before polling, Fleet checks the cluster entries, token, and local TLS files.
+Each node needs a name, certificate name, and numeric IP with a nonzero port;
+wildcard IPs are not allowed. Agents still verify credentials when connecting.
+Results print as checks finish. A slow check delays the next batch, not other
+checks in its batch. Ctrl+C stops only the watcher. It does not move workloads;
 a failed check does not prove that an app stopped.
 
 ### Test across computers

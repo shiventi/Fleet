@@ -122,16 +122,17 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
     Ok(desired)
 }
 
-/// Reads a cluster JSON file without contacting its agents.
+/// Reads and validates a cluster JSON file without contacting its agents.
 ///
 /// # Errors
-/// Returns an error if reading or parsing the file fails.
+/// Returns an error if reading, parsing, or validating the file fails.
 fn load_cluster(path: &std::path::Path) -> Result<ClusterSpec, String> {
     let contents = std::fs::read_to_string(path)
         .map_err(|err| format!("Failed to read cluster file: {}", err))?;
     let cluster: ClusterSpec =
         serde_json::from_str(&contents).map_err(|err| format!("Invalid cluster JSON: {}", err))?;
 
+    cluster.validate()?;
     Ok(cluster)
 }
 
@@ -220,7 +221,11 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            controller::watch(&cluster, &tls);
+
+            if let Err(error) = controller::watch(&cluster, &tls) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
         }
     }
 }
