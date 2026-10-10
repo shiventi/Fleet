@@ -18,8 +18,13 @@ Fleet what to run and which computer should take over if the main one goes down.
   after `stop`. The agent adds or removes copies to match the new target.
 - `watch` checks agents listed in a cluster JSON file and prints their counts or
   errors. It keeps checking even when one agent cannot be reached.
+- `dashboard` shows configured nodes in a terminal table. Live status is not
+  connected yet; every node shows `Not checked`.
 
 Replica counts are limited to 32. Invalid requests return an error.
+Failed launches are reported instead of crashing Fleet. Both `run` and `agent`
+wait at least five seconds before retrying a failed launch. This delay does not
+apply to apps that start successfully and then exit.
 
 Agent commands require trusted client/server certificates and a shared `FLEET_TOKEN`.
 TLS encrypts commands and tokens; plaintext connections are rejected. The client
@@ -41,6 +46,18 @@ cargo run -- run examples/demo.json
 
 The demo runs `/bin/sleep` for ten seconds, then starts it again. It works on
 macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
+
+### Try the dashboard
+
+Run in an interactive terminal; no running agents or credentials are needed yet:
+
+```sh
+cargo run -- dashboard --manifest examples/cluster.json \
+  --ca-cert unused --cert unused --private-key unused
+```
+
+The TLS flags are required by the CLI but currently unused by this screen.
+Addresses are hidden in narrow terminals. Exit with `q`, Esc, or Ctrl+C.
 
 ### Set up local credentials
 

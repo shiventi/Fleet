@@ -9,11 +9,14 @@ use std::io::{self, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 
 /// Adds or removes copies to match the target and handles one client at a time.
 ///
 /// Ctrl+C ends the loop and stops direct child processes.
+/// Failed launches are logged and retried after at least five seconds.
+/// The agent keeps handling commands during this delay.
 /// Client I/O can delay checks for up to five seconds per connection.
 /// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
 /// Requires a trusted client certificate. Remote addresses need `allow_remote`.
@@ -25,7 +28,7 @@ use subtle::ConstantTimeEq;
 /// Later connection errors are logged and the loop continues.
 ///
 /// # Panics
-/// Panics if a process cannot be started, checked, or stopped, or its count exceeds u32.
+/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
 pub fn allow_connection(
     address: &str,
     mut desired: WorkloadSpec,
@@ -62,6 +65,8 @@ pub fn allow_connection(
     println!("Listening on: {}", address);
     println!("Agent workload: {:?}", desired);
 
+    let mut retry_at = Instant::now();
+
     while keep_alive.load(Ordering::SeqCst) {
         let count = runner.running_count();
         let observed = ObservedWorkload {
@@ -75,8 +80,15 @@ pub fn allow_connection(
             }
             match action {
                 Action::Start { workload_name } => {
+                    if Instant::now() < retry_at {
+                        break;
+                    }
                     println!("Starting workload: {}", workload_name);
-                    runner.start(&desired);
+                    if let Err(error) = runner.start(&desired) {
+                        eprintln!("Failed to start {}: {}", workload_name, error);
+                        retry_at = Instant::now() + Duration::from_secs(5);
+                        break;
+                    }
                 }
                 Action::Stop { workload_name } => {
                     println!("Stopping one copy of {}", workload_name);

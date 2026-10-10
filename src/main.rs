@@ -4,6 +4,7 @@ mod agent;
 mod cli;
 mod client;
 mod controller;
+mod dashboard;
 mod protocol;
 mod runner;
 mod tls;
@@ -15,6 +16,7 @@ use controller::ClusterSpec;
 use runner::ProcessRunner;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use workload::WorkloadSpec;
 
 /// The reported number of running copies of a workload.
@@ -65,6 +67,7 @@ fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
 }
 
 /// Repeatedly observes the supplied workload and starts missing copies.
+/// Failed launches are logged and retried after at least five seconds.
 fn supervise(desired: WorkloadSpec) {
     let mut runner = ProcessRunner::new();
     let keep_alive = Arc::new(AtomicBool::new(true));
@@ -72,6 +75,8 @@ fn supervise(desired: WorkloadSpec) {
 
     ctrlc::set_handler(move || handler_keep_alive.store(false, Ordering::SeqCst))
         .expect("failed to register the ctrl+c handler");
+
+    let mut retry_at = Instant::now();
 
     while keep_alive.load(Ordering::SeqCst) {
         let count = runner.running_count();
@@ -90,8 +95,15 @@ fn supervise(desired: WorkloadSpec) {
         for act in actions {
             match act {
                 Action::Start { workload_name } => {
+                    if Instant::now() < retry_at {
+                        break;
+                    }
                     println!("Starting workload: {}", workload_name);
-                    runner.start(&desired);
+                    if let Err(error) = runner.start(&desired) {
+                        eprintln!("Failed to start {}: {}", workload_name, error);
+                        retry_at = Instant::now() + Duration::from_secs(5);
+                        break;
+                    }
                 }
                 Action::Stop { workload_name } => {
                     println!("Stopping isn't implemented yet for {}", workload_name);
@@ -223,6 +235,21 @@ fn main() {
             };
 
             if let Err(error) = controller::watch(&cluster, &tls) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Dashboard { manifest, tls } => {
+            let cluster = match load_cluster(&manifest) {
+                Ok(cluster) => cluster,
+                Err(error) => {
+                    eprintln!("Cluster error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+
+            if let Err(error) = dashboard::run(&cluster, &tls) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }

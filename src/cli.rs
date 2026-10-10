@@ -72,6 +72,16 @@ pub enum Commands {
         #[command(flatten)]
         tls: TlsFiles,
     },
+
+    /// Show configured nodes in a terminal dashboard; live checks are not connected yet.
+    Dashboard {
+        /// Path to the cluster manifest.
+        #[arg(long)]
+        manifest: PathBuf,
+        /// TLS paths reserved for live checks; currently unused by the screen.
+        #[command(flatten)]
+        tls: TlsFiles,
+    },
 }
 
 /// Connection address and trusted TLS identity for a status request.

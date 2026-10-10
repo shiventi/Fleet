@@ -23,18 +23,19 @@ impl ProcessRunner {
     /// Starts one copy of the workload and stores its process handle.
     /// The child does not inherit Fleet's control token.
     ///
-    /// # Panics
-    /// Panics if the program cannot be launched.
-    pub fn start(&mut self, workload: &WorkloadSpec) {
+    /// # Errors
+    /// Returns an error if the program cannot be launched.
+    pub fn start(&mut self, workload: &WorkloadSpec) -> std::io::Result<()> {
         let child = Command::new(&workload.program)
             .args(&workload.args)
             .env_remove("FLEET_TOKEN")
-            .spawn()
-            .expect("failed to start workload");
+            .spawn()?;
 
         println!("Started process: {}", child.id());
 
         self.children.push(child);
+
+        Ok(())
     }
 
     /// Checks processes without waiting and removes handles for exited processes.
@@ -97,8 +98,8 @@ mod tests {
             args: vec![String::from("60")],
         };
         let mut runner = ProcessRunner::new();
-        runner.start(&workload);
-        runner.start(&workload);
+        runner.start(&workload).expect("test process should start");
+        runner.start(&workload).expect("test process should start");
         runner.stop_one();
         let remaining = runner.running_count();
         runner.stop_all();
@@ -117,12 +118,28 @@ mod tests {
         };
 
         let mut runner = ProcessRunner::new();
-        runner.start(&workload);
+        runner.start(&workload).expect("test process should start");
 
         assert_eq!(runner.running_count(), 1);
 
         runner.stop_all();
 
+        assert_eq!(runner.running_count(), 0);
+    }
+
+    #[test]
+    fn failed_start_does_not_add_a_process() {
+        let workload = WorkloadSpec {
+            name: String::from("missing-program"),
+            replicas: 1,
+            program: String::from("/fleet-test-missing-directory/missing-program"),
+            args: Vec::new(),
+        };
+        let mut runner = ProcessRunner::new();
+
+        let result = runner.start(&workload);
+
+        assert!(result.is_err());
         assert_eq!(runner.running_count(), 0);
     }
 }
