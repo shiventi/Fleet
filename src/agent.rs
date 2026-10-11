@@ -29,12 +29,7 @@ use subtle::ConstantTimeEq;
 ///
 /// # Panics
 /// Panics if a process cannot be checked or stopped, or its count exceeds u32.
-pub fn allow_connection(
-    address: &str,
-    mut desired: WorkloadSpec,
-    files: &TlsFiles,
-    allow_remote: bool,
-) -> io::Result<()> {
+pub fn allow_connection(address: &str, mut desired: WorkloadSpec, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -141,12 +136,7 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
 /// # Errors
 /// Returns an error if reading, writing, or encoding fails.
 /// Invalid requests or wrong tokens receive an error reply without changing the workload.
-fn handle_client(
-    stream: &mut ServerStream,
-    desired: &mut WorkloadSpec,
-    runner: &mut ProcessRunner,
-    expected_token: &str,
-) -> io::Result<()> {
+fn handle_client(stream: &mut ServerStream, desired: &mut WorkloadSpec, runner: &mut ProcessRunner, expected_token: &str) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,

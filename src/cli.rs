@@ -73,7 +73,7 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
-    /// Show live agent counts and connection errors in a terminal dashboard.
+    /// Show live agent counts and scale the selected node with = or -.
     Dashboard {
         /// Path to the cluster manifest.
         #[arg(long)]

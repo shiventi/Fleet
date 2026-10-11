@@ -19,7 +19,8 @@ Fleet what to run and which computer should take over if the main one goes down.
 - `watch` checks agents listed in a cluster JSON file and prints their counts or
   errors. It keeps checking even when one agent cannot be reached.
 - `dashboard` shows live process counts and connection errors in a terminal
-  table. Background checks keep the screen responsive.
+  table. Select a node with Up/Down; `=` adds a copy and `-` removes one.
+  Background checks and commands keep the screen responsive.
 
 Replica counts are limited to 32. Invalid requests return an error.
 Failed launches are reported instead of crashing Fleet. Both `run` and `agent`
@@ -100,6 +101,15 @@ cargo run -- dashboard --manifest examples/cluster.json \
 The screen shows the latest process counts or connection error. The example has
 two agents; start another on port `7071` to connect both. Stop and restart an
 agent to see its row update automatically. A failed check does not prove the app stopped.
+
+Use Up/Down to select a node, then `=` to add a copy or `-` to remove one.
+No Ctrl or Shift is needed; `+` also works. Counts stay between 0 and 32;
+zero stops the workload, and `=` starts it again.
+Only one scale command runs at a time. Results appear below the table, and the
+running count may take another check to catch up. Scaling changes the agent's
+in-memory target, not its manifest. After a command fails, Fleet waits for a fresh
+successful check before allowing another; the agent might have applied it even
+if its reply was lost.
 
 One background thread checks nodes in order, with a two-second pause after each
 round. A slow node delays later checks, not keyboard input. Credentials are loaded

@@ -129,11 +129,7 @@ pub fn accept(socket: TcpStream, config: Arc<ServerConfig>) -> io::Result<Server
 /// # Errors
 /// Returns an error if the address or server name is invalid, connecting fails,
 /// or the TLS handshake fails.
-pub fn connect(
-    address: &str,
-    server_name: &str,
-    config: Arc<ClientConfig>,
-) -> io::Result<ClientStream> {
+pub fn connect(address: &str, server_name: &str, config: Arc<ClientConfig>) -> io::Result<ClientStream> {
     let name = ServerName::try_from(server_name.to_string()).map_err(io::Error::other)?;
     let connection = ClientConnection::new(config, name).map_err(io::Error::other)?;
     let address: SocketAddr = address.parse().map_err(io::Error::other)?;

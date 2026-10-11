@@ -108,13 +108,13 @@ impl FleetClient {
         Ok(())
     }
 
-    /// Sets the desired copy count and prints the agent's current counts.
+    /// Sets the desired copy count and returns the agent's current counts without printing.
     /// The running count may take another agent loop to reach the target.
     ///
     /// # Errors
     /// Returns an error if connecting, sending, reading, or parsing fails,
     /// or the agent rejects the request.
-    pub fn scale(&self, address: &str, replicas: u32, server_name: &str) -> io::Result<()> {
+    pub fn scale(&self, address: &str, replicas: u32, server_name: &str) -> io::Result<StatusResponse> {
         let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
         let request = AuthenticatedRequest {
             token: self.token.clone(),
@@ -130,16 +130,9 @@ impl FleetClient {
 
         let reply: Response = serde_json::from_str(&response)?;
         match reply {
-            Response::Status { status } => {
-                println!("Desired copies: {}", status.desired);
-                println!("Running copies: {}", status.running);
-            }
-            Response::Error { message } => {
-                return Err(io::Error::other(message));
-            }
+            Response::Status { status } => Ok(status),
+            Response::Error { message } => Err(io::Error::other(message)),
         }
-
-        Ok(())
     }
 }
 
@@ -147,11 +140,7 @@ impl FleetClient {
 ///
 /// # Errors
 /// Returns an error if client setup or the status request fails.
-pub fn fetch_status(
-    address: &str,
-    server_name: &str,
-    files: &TlsFiles,
-) -> io::Result<StatusResponse> {
+pub fn fetch_status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<StatusResponse> {
     let client = FleetClient::new(files)?;
     return client.fetch_status(address, server_name);
 }
@@ -171,5 +160,8 @@ pub fn stop(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()
 /// Returns an error if client setup or the scale request fails.
 pub fn scale(address: &str, replicas: u32, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
-    return client.scale(address, replicas, server_name);
+    let status = client.scale(address, replicas, server_name)?;
+    println!("Desired copies: {}", status.desired);
+    println!("Running copies: {}", status.running);
+    Ok(())
 }
