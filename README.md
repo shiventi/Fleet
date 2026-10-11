@@ -18,8 +18,8 @@ Fleet what to run and which computer should take over if the main one goes down.
   after `stop`. The agent adds or removes copies to match the new target.
 - `watch` checks agents listed in a cluster JSON file and prints their counts or
   errors. It keeps checking even when one agent cannot be reached.
-- `dashboard` shows configured nodes in a terminal table. Live status is not
-  connected yet; every node shows `Not checked`.
+- `dashboard` shows live process counts and connection errors in a terminal
+  table. Background checks keep the screen responsive.
 
 Replica counts are limited to 32. Invalid requests return an error.
 Failed launches are reported instead of crashing Fleet. Both `run` and `agent`
@@ -46,18 +46,6 @@ cargo run -- run examples/demo.json
 
 The demo runs `/bin/sleep` for ten seconds, then starts it again. It works on
 macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
-
-### Try the dashboard
-
-Run in an interactive terminal; no running agents or credentials are needed yet:
-
-```sh
-cargo run -- dashboard --manifest examples/cluster.json \
-  --ca-cert unused --cert unused --private-key unused
-```
-
-The TLS flags are required by the CLI but currently unused by this screen.
-Addresses are hidden in narrow terminals. Exit with `q`, Esc, or Ctrl+C.
 
 ### Set up local credentials
 
@@ -99,6 +87,25 @@ Use the same client options with `scale --replicas 3` or `stop` in place of `sta
 The token file is not loaded automatically; `export` supplies it to Fleet.
 Workloads are not sandboxed; untrusted apps need separate OS users or containers.
 Commit the setup script, not generated credentials or certificates.
+
+### Try the dashboard
+
+With the agent running, use the client terminal from above:
+
+```sh
+cargo run -- dashboard --manifest examples/cluster.json \
+  --ca-cert "$TLS/ca.crt" --cert "$TLS/client.crt" --private-key "$TLS/client.key"
+```
+
+The screen shows the latest process counts or connection error. The example has
+two agents; start another on port `7071` to connect both. Stop and restart an
+agent to see its row update automatically. A failed check does not prove the app stopped.
+
+One background thread checks nodes in order, with a two-second pause after each
+round. A slow node delays later checks, not keyboard input. Credentials are loaded
+once; restart the dashboard after changing them. Addresses are hidden on narrow
+screens, and long errors may be clipped. Exit with `q`, Esc, or Ctrl+C; quitting
+waits for the current check or pause to finish and does not stop agents.
 
 ### Watch agents
 

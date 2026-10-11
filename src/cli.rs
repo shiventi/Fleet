@@ -73,12 +73,12 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
-    /// Show configured nodes in a terminal dashboard; live checks are not connected yet.
+    /// Show live agent counts and connection errors in a terminal dashboard.
     Dashboard {
         /// Path to the cluster manifest.
         #[arg(long)]
         manifest: PathBuf,
-        /// TLS paths reserved for live checks; currently unused by the screen.
+        /// Trusted CA and client identity used to check the agents.
         #[command(flatten)]
         tls: TlsFiles,
     },
