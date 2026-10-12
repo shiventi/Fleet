@@ -5,6 +5,7 @@ mod cli;
 mod client;
 mod controller;
 mod dashboard;
+mod identity;
 mod protocol;
 mod runner;
 mod tls;
@@ -151,6 +152,13 @@ fn load_cluster(path: &std::path::Path) -> Result<ClusterSpec, String> {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Identity => match identity::DeviceIdentity::load_default() {
+            Ok(identity) => print!("{}", identity.public_key_pem()),
+            Err(error) => {
+                eprintln!("Identity error: {}", error);
+                std::process::exit(1);
+            }
+        },
         Commands::Agent {
             listen,
             manifest,

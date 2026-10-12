@@ -25,6 +25,9 @@ pub enum Commands {
         manifest: PathBuf,
     },
 
+    /// Create or reuse this device's identity and print only its public key.
+    Identity,
+
     /// Run a workload and accept commands over mutual TLS.
     Agent {
         #[arg(long)]

@@ -10,6 +10,8 @@ Fleet what to run and which computer should take over if the main one goes down.
 - `run` reads a JSON file, starts the requested copies, and restarts them when
   they exit. Ctrl+C stops its direct child processes.
 - `validate` checks a manifest without starting anything.
+- `identity` creates or reuses a saved device key and prints only its public key
+  on macOS/Linux. Pairing and certificate-free connections are not connected yet.
 - `agent` runs a workload and restarts missing copies. `status` shows its name
   and real process counts over mutual TLS. Ctrl+C stops the agent's direct children.
 - `stop` stops the workload without closing the agent. It sets the desired count
@@ -47,6 +49,25 @@ cargo run -- run examples/demo.json
 
 The demo runs `/bin/sleep` for ten seconds, then starts it again. It works on
 macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
+
+### Device identity
+
+```sh
+cargo run -- identity
+```
+
+No token, certificate files, or OpenSSL command is needed for this command.
+It creates `~/.config/fleet/identity/device-key.pem` on first use and reuses it on
+later runs. Run it twice to confirm that the public key stays the same.
+The identity directory is private (`700`), and the key is owner-only
+(`600`). Only the public key is printed. New identities are fully written before
+being published without replacing an existing key. Unsafe directories, symlinks,
+damaged keys, and broad permissions return errors instead of being repaired silently.
+
+The key has no certificate expiry date. Keep it private and include it in protected
+backups; deleting it creates a different identity on next use. Never share it with
+another device. This is the identity-storage step only: remote commands still use
+the certificates and token below. Windows identity storage and pairing come later.
 
 ### Set up local credentials
 
@@ -158,3 +179,5 @@ resolve in DNS. Allow the agent's port only from your controller on Tailscale.
 cargo run -- validate examples/demo.json
 cargo test
 ```
+
+Identity tests use temporary directories, not your saved device key.
