@@ -12,6 +12,8 @@ Fleet what to run and which computer should take over if the main one goes down.
 - `validate` checks a manifest without starting anything.
 - `identity` creates or reuses a saved device key and prints only its public key
   on macOS/Linux. Pairing and certificate-free connections are not connected yet.
+- `peers list`, `peers add`, and `peers remove` manage a saved list of approved
+  public keys. This list does not control network access yet.
 - `agent` runs a workload and restarts missing copies. `status` shows its name
   and real process counts over mutual TLS. Ctrl+C stops the agent's direct children.
 - `stop` stops the workload without closing the agent. It sets the desired count
@@ -68,6 +70,27 @@ The key has no certificate expiry date. Keep it private and include it in protec
 backups; deleting it creates a different identity on next use. Never share it with
 another device. This is the identity-storage step only: remote commands still use
 the certificates and token below. Windows identity storage and pairing come later.
+
+### Approved peers
+
+On the other computer, export its public key with `fleet identity > pi-public.pem`
+(or `cargo run -- identity > pi-public.pem`). Transfer only this public file, and
+verify it belongs to the intended device before approving it:
+
+```sh
+cargo run -- peers add pi pi-public.pem
+cargo run -- peers list
+cargo run -- peers remove pi
+```
+
+The list is saved privately in `~/.config/fleet/identity/trusted-peers.json`.
+Commands check Fleet's P-256 public keys, reject private keys and duplicates, and
+lock the list while updating it. Keep the separate `trusted-peers.lock` file in
+place. Names use 1-64 ASCII letters, digits, hyphens, underscores, or dots.
+Public-key files are limited to 16 KiB and the saved list to 1 MiB. Peer commands
+work on macOS/Linux without certificates or a token.
+Adding or removing a peer does not change the current certificate-based access;
+pairing and connecting this list to authentication are still separate work.
 
 ### Set up local credentials
 
@@ -126,6 +149,7 @@ agent to see its row update automatically. A failed check does not prove the app
 Use Up/Down to select a node, then `=` to add a copy or `-` to remove one.
 No Ctrl or Shift is needed; `+` also works. Counts stay between 0 and 32;
 zero stops the workload, and `=` starts it again.
+Ctrl-minus also removes a copy if your terminal passes that shortcut to Fleet.
 Only one scale command runs at a time. Results appear below the table, and the
 running count may take another check to catch up. Scaling changes the agent's
 in-memory target, not its manifest. After a command fails, Fleet waits for a fresh
@@ -177,7 +201,8 @@ resolve in DNS. Allow the agent's port only from your controller on Tailscale.
 
 ```sh
 cargo run -- validate examples/demo.json
-cargo test
+cargo test --locked
+cargo build --locked
 ```
 
-Identity tests use temporary directories, not your saved device key.
+Identity and peer tests use temporary directories, not your saved device keys.

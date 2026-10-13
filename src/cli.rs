@@ -85,6 +85,32 @@ pub enum Commands {
         #[command(flatten)]
         tls: TlsFiles,
     },
+
+    /// List, add, or remove approved device keys.
+    Peers {
+        #[command(subcommand)]
+        command: PeerCommands,
+    },
+}
+
+/// Operations on the local list of approved device keys.
+#[derive(Subcommand, Debug)]
+pub enum PeerCommands {
+    /// Show approved device names.
+    List,
+    /// Add a device using its exported public key, never its private key.
+    Add {
+        /// A unique label using ASCII letters, digits, hyphens, underscores, or dots.
+        name: String,
+        /// A public-key PEM file exported by the other device's identity command.
+        public_key_file: PathBuf,
+    },
+
+    /// Remove a device from the saved list.
+    Remove {
+        /// The saved device label to remove; this does not revoke TLS certificates.
+        name: String,
+    },
 }
 
 /// Connection address and trusted TLS identity for a status request.

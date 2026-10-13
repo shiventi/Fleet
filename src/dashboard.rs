@@ -5,7 +5,7 @@ use crate::controller::ClusterSpec;
 use crate::protocol::StatusResponse;
 use crate::tls::TlsFiles;
 use crate::workload::MAX_REPLICAS;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Color, Style};
@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 const ACCENT: Color = Color::Rgb(50, 108, 229);
 
 /// Shows configured nodes while collecting their status in the background.
-/// Up/Down selects a node; = or + adds a copy, and - removes one (0 to 32).
+/// Up/Down selects a node; = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
 /// Only one scale command can be pending. Command results appear below the table.
 /// Scaling changes the agent's in-memory target, not its manifest file.
 /// q, Esc, or Ctrl+C closes the screen and restores the terminal.
@@ -101,8 +101,9 @@ pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
                             }
 
                             let index = selection.selected().unwrap_or(0);
+                            let code = scale_key(key);
 
-                            match key.code {
+                            match code {
                                 KeyCode::Down => {
                                     let new_indx = (index + 1).min(cluster.nodes.len() - 1);
                                     selection.select(Some(new_indx))
@@ -119,7 +120,7 @@ pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
                                         );
                                         continue;
                                     }
-                                    match scale_command(index, key.code, &states) {
+                                    match scale_command(index, code, &states) {
                                         Ok(command) => {
                                             let replicas = command.replicas;
                                             match command_sender.try_send(command) {
@@ -227,6 +228,15 @@ fn scale_worker(cluster: &ClusterSpec, client: &FleetClient, receiver: mpsc::Rec
 fn apply_poll(update: PollResult, states: &mut [NodeState], pending: Option<usize>, updated_after: &[Instant]) {
     if pending != Some(update.index) && update.started_at >= updated_after[update.index] {
         states[update.index] = update.state;
+    }
+}
+
+/// Legacy terminals report Ctrl-minus as Ctrl+7 or Ctrl+_.
+fn scale_key(key: KeyEvent) -> KeyCode {
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('7') | KeyCode::Char('_')) {
+        KeyCode::Char('-')
+    } else {
+        key.code
     }
 }
 
@@ -356,6 +366,22 @@ mod tests {
         assert_eq!(command.replicas, 4);
         let command = scale_command(1, KeyCode::Char('-'), &states).expect("scale down");
         assert_eq!(command.replicas, 2);
+    }
+
+    #[test]
+    fn control_minus_accepts_explicit_and_legacy_key_events() {
+        let states = vec![connected(2, 2)];
+        for character in ['-', '7', '_'] {
+            let code = scale_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL));
+            let command = scale_command(0, code, &states).expect("Ctrl-minus should scale down");
+            assert_eq!(command.replicas, 1);
+        }
+        for character in ['7', '_'] {
+            let code = scale_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+            assert!(scale_command(0, code, &states).is_err());
+        }
+        let code = scale_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::CONTROL));
+        assert!(scale_command(0, code, &[connected(0, 0)]).is_err());
     }
 
     #[test]

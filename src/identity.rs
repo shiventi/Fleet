@@ -34,36 +34,7 @@ impl DeviceIdentity {
     /// Loads a private key, rejecting unsafe files, invalid keys, or read errors.
     #[cfg(unix)]
     pub fn load(path: &Path) -> io::Result<Self> {
-        check_directory(parent_directory(path), true)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
-            )
-            .open(path)?;
-        let metadata = file.metadata()?;
-        if !metadata.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Identity must be a regular file",
-            ));
-        }
-        if metadata.uid() != rustix::process::geteuid().as_raw()
-            || metadata.permissions().mode() & 0o077 != 0
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Identity file must belong to you and have owner-only permissions",
-            ));
-        }
-        let mut pem = String::new();
-        file.take(MAX_KEY_BYTES + 1).read_to_string(&mut pem)?;
-        if pem.len() as u64 > MAX_KEY_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Identity file exceeds 16 KiB",
-            ));
-        }
+        let pem = read_private(path, MAX_KEY_BYTES)?;
         let key_pair = KeyPair::from_pem(&pem).map_err(io::Error::other)?;
 
         Ok(Self { key_pair })
@@ -73,15 +44,8 @@ impl DeviceIdentity {
     /// Returns file, permission, or sync errors.
     #[cfg(unix)]
     pub fn save_new(&self, path: &Path) -> io::Result<()> {
-        let parent = parent_directory(path);
-        check_directory(parent, true)?;
-        let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        file.write_all(self.key_pair.serialize_pem().as_bytes())?;
-        file.as_file().sync_all()?;
-        file.persist_noclobber(path).map_err(|error| error.error)?;
-        std::fs::File::open(parent)?.sync_all()?;
-
-        Ok(())
+        let pem = self.key_pair.serialize_pem();
+        write_private(path, pem.as_bytes(), false)
     }
 
     /// Reuses a saved key or creates a missing one. Other errors are returned unchanged.
@@ -122,20 +86,45 @@ impl DeviceIdentity {
 
     #[cfg(unix)]
     fn load_for_home(home: &Path) -> io::Result<Self> {
-        if !home.is_absolute() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "HOME must be an absolute directory path",
-            ));
-        }
-        check_directory(home, false)?;
-        let mut directory = home.to_path_buf();
-        for name in [".config", "fleet", "identity"] {
-            directory.push(name);
-            ensure_directory(&directory, name == "identity")?;
-        }
+        let directory = prepare_directory(home)?;
         Self::load_or_create(&directory.join("device-key.pem"))
     }
+}
+
+/// Finds and prepares private storage without creating a device key.
+/// Returns storage errors; non-Unix platforms are not supported yet.
+pub(crate) fn default_directory() -> io::Result<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        let home = std::env::var_os("HOME")
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
+        prepare_directory(Path::new(&home))
+    }
+    #[cfg(not(unix))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Automatic identity storage currently supports macOS and Linux only",
+        ))
+    }
+}
+
+/// Creates or checks private storage without creating a device key.
+#[cfg(unix)]
+fn prepare_directory(home: &Path) -> io::Result<std::path::PathBuf> {
+    if !home.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "HOME must be an absolute directory path",
+        ));
+    }
+    check_directory(home, false)?;
+    let mut directory = home.to_path_buf();
+    for name in [".config", "fleet", "identity"] {
+        directory.push(name);
+        ensure_directory(&directory, name == "identity")?;
+    }
+    Ok(directory)
 }
 
 #[cfg(unix)]
@@ -171,6 +160,94 @@ fn check_directory(path: &Path, private: bool) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Writes a complete, owner-only file in a private directory.
+/// Existing files must be safe text files no larger than 1 MiB to be replaced.
+#[cfg(unix)]
+pub(crate) fn write_private(path: &Path, contents: &[u8], replace: bool) -> io::Result<()> {
+    let parent = parent_directory(path);
+    check_directory(parent, true)?;
+    if replace {
+        match read_private(path, 1024 * 1024) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(contents)?;
+    file.as_file().sync_all()?;
+    let saved = if replace {
+        file.persist(path)
+    } else {
+        file.persist_noclobber(path)
+    };
+    saved.map_err(|error| error.error)?;
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+/// Reads bounded text from a regular, owner-only file in a private directory.
+#[cfg(unix)]
+pub(crate) fn read_private(path: &Path, max_bytes: u64) -> io::Result<String> {
+    check_directory(parent_directory(path), true)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Private storage must be a regular file",
+        ));
+    }
+    if metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Private file must belong to you and have owner-only permissions",
+        ));
+    }
+    let mut pem = String::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_string(&mut pem)?;
+    if pem.len() as u64 > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Private file exceeds its size limit",
+        ));
+    }
+    Ok(pem)
+}
+
+/// Locks a separate private file until the returned handle is dropped.
+/// Keep the lock file in place so all callers lock the same file.
+#[cfg(unix)]
+pub(crate) fn lock_private(path: &Path) -> io::Result<std::fs::File> {
+    check_directory(parent_directory(path), true)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Lock file must be a regular, owner-only file belonging to you",
+        ));
+    }
+    file.lock()?;
+    Ok(file)
 }
 
 /// New directories are private; existing unsafe directories are rejected, not modified.

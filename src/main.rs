@@ -10,6 +10,7 @@ mod protocol;
 mod runner;
 mod tls;
 mod workload;
+mod trust;
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -156,6 +157,12 @@ fn main() {
             Ok(identity) => print!("{}", identity.public_key_pem()),
             Err(error) => {
                 eprintln!("Identity error: {}", error);
+                std::process::exit(1);
+            }
+        },
+        Commands::Peers { command } => {
+            if let Err(error) = trust::run(command) {
+                eprintln!("Peer error: {}", error);
                 std::process::exit(1);
             }
         },
