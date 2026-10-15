@@ -153,8 +153,20 @@ fn load_cluster(path: &std::path::Path) -> Result<ClusterSpec, String> {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Identity => match identity::DeviceIdentity::load_default() {
-            Ok(identity) => print!("{}", identity.public_key_pem()),
+        Commands::Identity { fingerprint } => match identity::DeviceIdentity::load_default() {
+            Ok(identity) => {
+                if fingerprint {
+                    match identity::fingerprint(&identity.public_key_pem()) {
+                        Ok(out) => println!("{}", out),
+                        Err(err) => {
+                            eprintln!("Identity error: {}", err);
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    print!("{}", identity.public_key_pem());
+                }
+            }
             Err(error) => {
                 eprintln!("Identity error: {}", error);
                 std::process::exit(1);

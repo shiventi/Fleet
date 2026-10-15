@@ -9,6 +9,119 @@ fn private_directory() -> tempfile::TempDir {
 }
 
 #[test]
+fn signing_key_matches_the_saved_identity_without_changing_it() {
+    use rcgen::PublicKeyData;
+    let directory = private_directory();
+    let path = directory.path().join("identity.pem");
+    let identity = DeviceIdentity::load_or_create(&path).expect("create test identity");
+    let expected = identity.key_pair.subject_public_key_info();
+    let before = std::fs::read(&path).expect("read saved identity");
+
+    let loaded = DeviceIdentity::load(&path).expect("reload test identity");
+    let signer = loaded.signing_key().expect("load Rustls signer");
+    let actual = signer.public_key().expect("signer public key");
+    assert_eq!(actual.as_ref(), expected.as_slice());
+    assert_eq!(
+        std::fs::read(&path).expect("read unchanged identity"),
+        before
+    );
+}
+
+#[test]
+fn signing_key_signatures_reject_changed_messages_and_other_keys() {
+    use rcgen::PublicKeyData;
+    let identity = DeviceIdentity::generate().expect("generate test identity");
+    let public_key = identity.key_pair.der_bytes().to_vec();
+    let signing_key = identity.signing_key().expect("load Rustls signer");
+    drop(identity);
+
+    let scheme = rustls::SignatureScheme::ECDSA_NISTP256_SHA256;
+    assert!(
+        signing_key
+            .choose_scheme(&[rustls::SignatureScheme::RSA_PSS_SHA256])
+            .is_none()
+    );
+    let signer = signing_key
+        .choose_scheme(&[scheme])
+        .expect("supported signature scheme");
+    let message = b"Fleet signing test";
+    let signature = signer.sign(message).expect("sign test message");
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    let verifier = provider
+        .signature_verification_algorithms
+        .mapping
+        .iter()
+        .find(|(candidate, _)| *candidate == scheme)
+        .expect("P-256 verifier")
+        .1[0];
+
+    assert!(
+        verifier
+            .verify_signature(&public_key, message, &signature)
+            .is_ok()
+    );
+    assert!(
+        verifier
+            .verify_signature(&public_key, b"Changed message", &signature)
+            .is_err()
+    );
+    let other = KeyPair::generate().expect("different identity");
+    assert!(
+        verifier
+            .verify_signature(other.der_bytes(), message, &signature)
+            .is_err()
+    );
+}
+
+#[test]
+fn fingerprint_hashes_public_der_and_returns_full_lowercase_hex() {
+    use rcgen::PublicKeyData;
+    let key = KeyPair::generate().expect("generate test key");
+    let result = fingerprint(&key.public_key_pem()).expect("fingerprint public key");
+    let expected = Sha256::digest(key.subject_public_key_info());
+    assert_eq!(result, format!("SHA256:{expected:x}"));
+    let hex = result.strip_prefix("SHA256:").expect("fingerprint prefix");
+    assert_eq!(hex.len(), 64);
+    assert!(
+        hex.bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+}
+
+#[test]
+fn fingerprints_are_stable_and_ignore_pem_formatting() {
+    let key = KeyPair::generate()
+        .expect("generate test key")
+        .public_key_pem();
+    let expected = fingerprint(&key).expect("fingerprint key");
+    assert_eq!(fingerprint(&key).unwrap(), expected);
+    let formatted = format!(" \n{}\n\t", key.replace('\n', "\r\n"));
+    assert_eq!(fingerprint(&formatted).expect("formatted key"), expected);
+}
+
+#[test]
+fn different_public_keys_have_different_fingerprints() {
+    let first = KeyPair::generate().expect("first key").public_key_pem();
+    let second = KeyPair::generate().expect("second key").public_key_pem();
+    assert_ne!(fingerprint(&first).unwrap(), fingerprint(&second).unwrap());
+}
+
+#[test]
+fn fingerprints_reject_private_malformed_and_unsupported_keys() {
+    let key = KeyPair::generate().expect("test key");
+    let unsupported = KeyPair::generate_for(&rcgen::PKCS_ED25519).expect("unsupported test key");
+    for input in [
+        String::new(),
+        "not a key".into(),
+        key.serialize_pem(),
+        key.public_key_pem().repeat(2),
+        unsupported.public_key_pem(),
+    ] {
+        assert!(fingerprint(&input).is_err());
+    }
+}
+
+#[test]
 fn saved_identity_keeps_its_public_key() {
     let directory = private_directory();
     let path = directory.path().join("identity.pem");

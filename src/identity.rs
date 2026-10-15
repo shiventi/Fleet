@@ -1,7 +1,13 @@
-//! Creates and reuses this device's identity. Not connected to authentication yet.
+//! Stores device identities, fingerprints public keys, and prepares Rustls signers.
+//! Network authentication does not use these identities yet.
 
+use p256::pkcs8::{DecodePublicKey, EncodePublicKey};
 use rcgen::KeyPair;
+use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::sign::SigningKey;
+use sha2::{Digest, Sha256};
 use std::io;
+use std::sync::Arc;
 #[cfg(unix)]
 use std::{
     fs::OpenOptions,
@@ -89,6 +95,36 @@ impl DeviceIdentity {
         let directory = prepare_directory(home)?;
         Self::load_or_create(&directory.join("device-key.pem"))
     }
+
+    /// Loads this identity into Rustls's signer without changing the saved key.
+    /// Does not open a connection or approve any peer.
+    ///
+    /// # Errors
+    /// Returns an error if Rustls cannot load the private key.
+    pub fn signing_key(&self) -> io::Result<Arc<dyn SigningKey>> {
+        let der = self.key_pair.serialize_der();
+        let key: PrivateKeyDer<'static> = PrivatePkcs8KeyDer::from(der).into();
+        let provider = rustls::crypto::aws_lc_rs::default_provider();
+
+        provider
+            .key_provider
+            .load_private_key(key)
+            .map_err(io::Error::other)
+    }
+}
+/// Returns SHA256: followed by 64 lowercase hexadecimal characters for a P-256 key.
+/// Hashes standard DER bytes so PEM whitespace and line endings do not matter.
+/// Compare the full value through a trusted channel; it does not prove ownership.
+///
+/// # Errors
+/// Returns an error for invalid PEM, private keys, or unsupported key types.
+pub(crate) fn fingerprint(public_key: &str) -> io::Result<String> {
+    let key = p256::PublicKey::from_public_key_pem(public_key.trim()).map_err(io::Error::other)?;
+    let der = key.to_public_key_der().map_err(io::Error::other)?;
+
+    let hash = Sha256::digest(der.as_bytes());
+
+    Ok(format!("SHA256:{:x}", hash))
 }
 
 /// Finds and prepares private storage without creating a device key.

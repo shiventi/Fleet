@@ -11,9 +11,10 @@ Fleet what to run and which computer should take over if the main one goes down.
   they exit. Ctrl+C stops its direct child processes.
 - `validate` checks a manifest without starting anything.
 - `identity` creates or reuses a saved device key and prints only its public key
-  on macOS/Linux. Pairing and certificate-free connections are not connected yet.
-- `peers list`, `peers add`, and `peers remove` manage a saved list of approved
-  public keys. This list does not control network access yet.
+  on macOS/Linux. `--fingerprint` prints its SHA-256 fingerprint instead.
+  Pairing and certificate-free connections are not connected yet.
+- `peers` lists, shows, adds, and removes saved device public keys.
+  This list does not control network access yet.
 - `agent` runs a workload and restarts missing copies. `status` shows its name
   and real process counts over mutual TLS. Ctrl+C stops the agent's direct children.
 - `stop` stops the workload without closing the agent. It sets the desired count
@@ -56,20 +57,27 @@ macOS and Linux. Edit `examples/demo.json` to change the program or copy count.
 
 ```sh
 cargo run -- identity
+cargo run -- identity --fingerprint
 ```
 
 No token, certificate files, or OpenSSL command is needed for this command.
 It creates `~/.config/fleet/identity/device-key.pem` on first use and reuses it on
 later runs. Run it twice to confirm that the public key stays the same.
 The identity directory is private (`700`), and the key is owner-only
-(`600`). Only the public key is printed. New identities are fully written before
+(`600`). Only the public key or its fingerprint is printed. New identities are fully written before
 being published without replacing an existing key. Unsafe directories, symlinks,
 damaged keys, and broad permissions return errors instead of being repaired silently.
 
+Fingerprints use `SHA256:` followed by 64 lowercase hex characters. They hash the
+decoded public key, not PEM text, so line endings do not change the value.
+Compare the full fingerprint through a trusted channel before approving a device;
+a matching fingerprint alone does not prove who owns the key.
+
 The key has no certificate expiry date. Keep it private and include it in protected
 backups; deleting it creates a different identity on next use. Never share it with
-another device. This is the identity-storage step only: remote commands still use
-the certificates and token below. Windows identity storage and pairing come later.
+another device. Saved identities can now be loaded into a Rustls signer, but are
+not used for connections yet. Remote commands still use the certificates and
+token below. Windows identity storage and pairing come later.
 
 ### Approved peers
 
@@ -80,6 +88,7 @@ verify it belongs to the intended device before approving it:
 ```sh
 cargo run -- peers add pi pi-public.pem
 cargo run -- peers list
+cargo run -- peers show pi
 cargo run -- peers remove pi
 ```
 
@@ -89,6 +98,9 @@ lock the list while updating it. Keep the separate `trusted-peers.lock` file in
 place. Names use 1-64 ASCII letters, digits, hyphens, underscores, or dots.
 Public-key files are limited to 16 KiB and the saved list to 1 MiB. Peer commands
 work on macOS/Linux without certificates or a token.
+`show` prints one peer's name, fingerprint, and public key without changing the
+list; missing names return an error. Its fingerprint should match the other
+device's `identity --fingerprint` output.
 Adding or removing a peer does not change the current certificate-based access;
 pairing and connecting this list to authentication are still separate work.
 

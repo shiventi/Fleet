@@ -125,7 +125,7 @@ impl TrustStore {
     }
 }
 
-/// Lists or changes the saved peers while holding a separate file lock.
+/// Lists, shows, or changes saved peers while holding a separate file lock.
 /// Does not need certificates or a token and does not change network access yet.
 ///
 /// # Errors
@@ -169,6 +169,22 @@ pub fn run(command: PeerCommands) -> io::Result<()> {
                 }
                 store.save(&path)?;
                 println!("Removed peer: {}", name);
+            }
+            PeerCommands::Show { name } => {
+                match store.peers().iter().find(|peer| peer.name == name) {
+                    Some(peer) => {
+                        let fingerprint = crate::identity::fingerprint(&peer.public_key)?;
+                        println!("Device name: {}", peer.name);
+                        println!("Fingerprint: {}", fingerprint);
+                        print!("Public key:\n{}", peer.public_key);
+                    }
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "Device was not found",
+                        ));
+                    }
+                }
             }
         }
         Ok(())

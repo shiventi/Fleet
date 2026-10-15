@@ -85,6 +85,60 @@ fn lists_adds_reloads_and_removes_peers_without_creating_an_identity() {
 }
 
 #[test]
+fn shows_only_the_requested_peers_public_key_without_changing_the_list() {
+    let home = private_home();
+    let first = public_file(home.path(), "pi.pem");
+    let second = public_file(home.path(), "ovh.pem");
+    for (name, path) in [("pi", &first), ("ovh", &second)] {
+        assert!(
+            run(home.path(), &["peers", "add", name, path.to_str().unwrap()])
+                .status
+                .success()
+        );
+    }
+    let path = saved_path(home.path());
+    let before = std::fs::read(&path).expect("read saved list");
+    let result = run(home.path(), &["peers", "show", "pi"]);
+    assert!(result.status.success());
+    assert!(result.stderr.is_empty());
+    let key = std::fs::read_to_string(&first).expect("read public key");
+    use p256::pkcs8::{DecodePublicKey, EncodePublicKey};
+    use sha2::{Digest, Sha256};
+    let der = p256::PublicKey::from_public_key_pem(&key)
+        .unwrap()
+        .to_public_key_der()
+        .unwrap();
+    let hash = Sha256::digest(der.as_bytes());
+    assert_eq!(
+        String::from_utf8(result.stdout).unwrap(),
+        format!("Device name: pi\nFingerprint: SHA256:{hash:x}\nPublic key:\n{key}")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn showing_a_missing_peer_returns_an_error_without_changing_storage() {
+    let home = private_home();
+    let empty = run(home.path(), &["peers", "show", "missing"]);
+    assert!(!empty.status.success());
+    assert!(empty.stdout.is_empty());
+    assert!(!saved_path(home.path()).exists());
+    let key = public_file(home.path(), "pi.pem");
+    assert!(
+        run(home.path(), &["peers", "add", "pi", key.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let path = saved_path(home.path());
+    let before = std::fs::read(&path).expect("read saved list");
+    let result = run(home.path(), &["peers", "show", "missing"]);
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Device was not found"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
 fn rejects_private_keys_without_printing_or_saving_them() {
     let home = private_home();
     let key = rcgen::KeyPair::generate()

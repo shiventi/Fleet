@@ -25,8 +25,12 @@ pub enum Commands {
         manifest: PathBuf,
     },
 
-    /// Create or reuse this device's identity and print only its public key.
-    Identity,
+    /// Create or reuse this device's identity and print its public key or fingerprint.
+    Identity {
+        /// Print the public key's SHA-256 fingerprint instead of its PEM text.
+        #[arg(long)]
+        fingerprint: bool,
+    },
 
     /// Run a workload and accept commands over mutual TLS.
     Agent {
@@ -86,7 +90,7 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
-    /// List, add, or remove approved device keys.
+    /// List, inspect, add, or remove approved device keys.
     Peers {
         #[command(subcommand)]
         command: PeerCommands,
@@ -109,6 +113,11 @@ pub enum PeerCommands {
     /// Remove a device from the saved list.
     Remove {
         /// The saved device label to remove; this does not revoke TLS certificates.
+        name: String,
+    },
+    /// Show one saved device's name, fingerprint, and public key.
+    Show {
+        /// The saved device label to inspect.
         name: String,
     },
 }
