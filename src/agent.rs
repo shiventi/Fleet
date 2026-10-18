@@ -1,10 +1,14 @@
 //! Manages workload copies and handles commands over mutual TLS.
 
+use crate::device_tls;
+use crate::identity::DeviceIdentity;
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
 use crate::tls::{self, ServerStream, TlsFiles};
+use crate::trust::TrustStore;
 use crate::workload::{MAX_REPLICAS, WorkloadSpec};
 use crate::{Action, ObservedWorkload, plan};
+use rustls::ServerConfig;
 use std::io::{self, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
@@ -12,24 +16,49 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 
-/// Adds or removes copies to match the target and handles one client at a time.
+/// Runs an agent using trusted client certificates and a shared token.
+///
+/// # Errors
+/// Returns an error if TLS setup or agent startup fails.
+///
+/// # Panics
+/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
+pub fn allow_connection(address: &str, desired: WorkloadSpec, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
+    let config = Arc::new(tls::server_config(files)?);
+    serve(address, desired, config, allow_remote)
+}
+
+/// Runs an agent using approved client device keys and a shared token.
+/// Approvals are copied at startup; restart the agent after changing them.
+///
+/// # Errors
+/// Returns an error if device-key setup or agent startup fails.
+///
+/// # Panics
+/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
+pub fn allow_device_connection(address: &str, desired: WorkloadSpec, identity: &DeviceIdentity, store: &TrustStore, allow_remote: bool) -> io::Result<()> {
+    let config = Arc::new(device_tls::server_config(identity, store)?);
+    serve(address, desired, config, allow_remote)
+}
+
+/// Adds or removes copies and handles commands using the supplied TLS config.
 ///
 /// Ctrl+C ends the loop and stops direct child processes.
 /// Failed launches are logged and retried after at least five seconds.
 /// The agent keeps handling commands during this delay.
 /// Client I/O can delay checks for up to five seconds per connection.
 /// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
-/// Requires a trusted client certificate. Remote addresses need `allow_remote`.
+/// Requires an authenticated TLS client. Remote addresses need `allow_remote`.
 /// Wildcard addresses such as `0.0.0.0` and `::` are rejected.
 ///
 /// # Errors
 /// Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
-/// TLS files are invalid, or the listener or Ctrl+C handler cannot be set up.
+/// or the listener or Ctrl+C handler cannot be set up.
 /// Later connection errors are logged and the loop continues.
 ///
 /// # Panics
 /// Panics if a process cannot be checked or stopped, or its count exceeds u32.
-pub fn allow_connection(address: &str, mut desired: WorkloadSpec, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
+fn serve(address: &str, mut desired: WorkloadSpec, config: Arc<ServerConfig>, allow_remote: bool) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -49,7 +78,6 @@ pub fn allow_connection(address: &str, mut desired: WorkloadSpec, files: &TlsFil
         return Err(io::Error::other("Remote addresses require --allow-remote"));
     }
 
-    let config = Arc::new(tls::server_config(files)?);
     let mut runner = ProcessRunner::new();
     let listener = TcpListener::bind(listen_address)?;
     listener.set_nonblocking(true)?;

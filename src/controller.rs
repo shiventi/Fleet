@@ -14,6 +14,10 @@ pub struct NodeSpec {
     pub address: String,
     /// The name expected in the agent's certificate.
     pub server_name: String,
+
+    /// Saved device name used by device-key connections; optional in certificate mode.
+    #[serde(default)]
+    pub peer: Option<String>,
 }
 
 /// The agents listed in a cluster file.
@@ -33,16 +37,35 @@ pub struct ClusterSpec {
 /// This function does not start, stop, or move workloads.
 ///
 /// # Errors
-/// Returns an error before polling if the token is missing or blank, or the local
-/// TLS files cannot be loaded. Agents check the token and certificates on connection.
+/// Returns an error if the cluster is invalid, the token is missing or blank,
+/// or the local TLS files cannot be loaded.
 pub fn watch(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     let client = client::FleetClient::new(files)?;
+    let clients = vec![client; cluster.nodes.len()];
+    watch_clients(cluster, &clients)
+}
+
+/// Watches each node using its named, approved device key and the shared token.
+/// Restart the watcher to reload keys or approvals. Leaves agents running.
+///
+/// # Errors
+/// Returns an error if the cluster, peer names, saved keys, or token are invalid.
+pub fn watch_device(cluster: &ClusterSpec) -> io::Result<()> {
+    let clients = cluster.device_clients()?;
+    watch_clients(cluster, &clients)
+}
+
+/// Checks matching nodes and clients in batches of up to four.
+fn watch_clients(cluster: &ClusterSpec, clients: &[client::FleetClient]) -> io::Result<()> {
+    cluster.validate().map_err(io::Error::other)?;
+    if cluster.nodes.len() != clients.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Each node needs one client"));
+    }
 
     loop {
-        for batch in cluster.nodes.chunks(4) {
+        for (nodes, clients) in cluster.nodes.chunks(4).zip(clients.chunks(4)) {
             std::thread::scope(|scope| {
-                let client = &client;
-                for node in batch {
+                for (node, client) in nodes.iter().zip(clients.iter()) {
                     scope.spawn(move || check_node(node, client));
                 }
             });
@@ -94,6 +117,28 @@ impl ClusterSpec {
 
         Ok(())
     }
+
+    /// Loads one client per node, in manifest order, using each node's approved peer.
+    ///
+    /// # Errors
+    /// Returns an error if validation, peer lookup, key loading, or token loading fails.
+    pub fn device_clients(&self) -> io::Result<Vec<client::FleetClient>> {
+        self.validate().map_err(io::Error::other)?;
+        let mut clients = Vec::new();
+
+        for node in &self.nodes {
+            let peer = match &node.peer {
+                Some(peer) if !peer.trim().is_empty() => peer,
+                _ => {
+                    return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Node '{}' needs a nonblank peer name", node.name)));
+                }
+
+            };
+            clients.push(client::FleetClient::for_peer(peer)?);
+        }
+
+        Ok(clients)
+    }
 }
 
 #[cfg(test)]
@@ -105,7 +150,53 @@ mod tests {
             name: String::from("test-agent"),
             address: String::from(address),
             server_name: String::from("localhost"),
+            peer: None,
         }
+    }
+
+    #[test]
+    fn watch_rejects_missing_clients_before_polling() {
+        let cluster = ClusterSpec { nodes: vec![node("127.0.0.1:7070")] };
+        let error = watch_clients(&cluster, &[]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "Each node needs one client");
+    }
+
+    #[test]
+    fn watch_rejects_empty_clusters_before_polling() {
+        let cluster = ClusterSpec { nodes: Vec::new() };
+        assert!(watch_clients(&cluster, &[]).is_err());
+    }
+
+    #[test]
+    fn device_clients_reject_missing_and_blank_peer_names() {
+        for peer in [None, Some(String::new()), Some(String::from(" \t"))] {
+            let mut node = node("127.0.0.1:7070");
+            node.peer = peer;
+            let cluster = ClusterSpec { nodes: vec![node] };
+            let error = match cluster.device_clients() {
+                Ok(_) => panic!("accepted missing or blank peer"),
+                Err(error) => error,
+            };
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("test-agent"));
+        }
+    }
+
+    #[test]
+    fn certificate_manifests_can_omit_peer_names() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster.json")).unwrap();
+        assert!(cluster.nodes.iter().all(|node| node.peer.is_none()));
+        cluster.validate().unwrap();
+    }
+
+    #[test]
+    fn device_example_has_separate_peer_names() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster-device.json")).unwrap();
+        cluster.validate().unwrap();
+        assert_eq!(cluster.nodes.len(), 2);
+        assert_eq!(cluster.nodes[0].peer.as_deref(), Some("local-one"));
+        assert_eq!(cluster.nodes[1].peer.as_deref(), Some("local-two"));
     }
 
     #[test]

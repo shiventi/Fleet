@@ -1,4 +1,4 @@
-//! Stores approved device keys. Network authentication does not use this list yet.
+//! Stores device keys approved for the device-key agent and client commands.
 use crate::cli::PeerCommands;
 use p256::pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding};
 use serde::{Deserialize, Serialize};

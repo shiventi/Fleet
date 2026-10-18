@@ -34,6 +34,30 @@ const ACCENT: Color = Color::Rgb(50, 108, 229);
 /// Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
 pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
+    let clients = vec![client; cluster.nodes.len()];
+    run_clients(cluster, &clients)
+}
+
+/// Shows and scales agents using each node's named, approved device key.
+/// Uses the same controls as certificate mode. Quitting leaves agents running.
+///
+/// # Errors
+/// Returns an error if the cluster, credentials, or terminal I/O are invalid.
+///
+/// # Panics
+/// Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
+pub fn run_device(cluster: &ClusterSpec) -> io::Result<()> {
+    let clients = cluster.device_clients()?;
+    run_clients(cluster, &clients)
+}
+
+/// Runs the shared screen with one prepared client per node, in manifest order.
+fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()> {
+    cluster.validate().map_err(io::Error::other)?;
+    if cluster.nodes.len() != clients.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Each node needs one client"));
+    }
+
     let mut states: Vec<NodeState> = Vec::new();
     for _ in &cluster.nodes {
         states.push(NodeState::NotChecked);
@@ -51,11 +75,11 @@ pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     selection.select(Some(0));
     std::thread::scope(|scope| {
         let _shutdown = ShutdownFlag(&keep_alive);
-        scope.spawn(|| poll_nodes(cluster, &client, sender, &keep_alive));
+        scope.spawn(|| poll_nodes(cluster, clients, sender, &keep_alive));
         scope.spawn(|| {
             scale_worker(
                 cluster,
-                &client,
+                clients,
                 command_receiver,
                 result_sender,
                 &keep_alive,
@@ -157,9 +181,9 @@ pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
 
 /// Checks each node and sends its index and latest result to the screen.
 /// Stops when requested or when the screen's receiver is dropped.
-fn poll_nodes(cluster: &ClusterSpec, client: &FleetClient, sender: mpsc::Sender<PollResult>, keep_alive: &AtomicBool) {
+fn poll_nodes(cluster: &ClusterSpec, clients: &[FleetClient], sender: mpsc::Sender<PollResult>, keep_alive: &AtomicBool) {
     while keep_alive.load(Ordering::Relaxed) {
-        for (index, node) in cluster.nodes.iter().enumerate() {
+        for (index, (node, client)) in cluster.nodes.iter().zip(clients.iter()).enumerate() {
             if !keep_alive.load(Ordering::Relaxed) {
                 return;
             }
@@ -194,7 +218,7 @@ fn poll_nodes(cluster: &ClusterSpec, client: &FleetClient, sender: mpsc::Sender<
 }
 
 /// Receives scale commands and sends their replies back without printing.
-fn scale_worker(cluster: &ClusterSpec, client: &FleetClient, receiver: mpsc::Receiver<ScaleCommand>, sender: mpsc::Sender<ScaleResult>, keep_alive: &AtomicBool) {
+fn scale_worker(cluster: &ClusterSpec, clients: &[FleetClient], receiver: mpsc::Receiver<ScaleCommand>, sender: mpsc::Sender<ScaleResult>, keep_alive: &AtomicBool) {
     while keep_alive.load(Ordering::Relaxed) {
         let command = match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(command) => command,
@@ -206,8 +230,8 @@ fn scale_worker(cluster: &ClusterSpec, client: &FleetClient, receiver: mpsc::Rec
             return;
         }
 
-        let reply = match cluster.nodes.get(command.index) {
-            Some(node) => client
+        let reply = match cluster.nodes.get(command.index).zip(clients.get(command.index)) {
+            Some((node, client)) => client
                 .scale(&node.address, command.replicas, &node.server_name)
                 .map_err(|error| error.to_string()),
             None => Err(String::from("Unknown node")),
@@ -338,7 +362,6 @@ fn draw(frame: &mut Frame, cluster: &ClusterSpec, states: &[NodeState], selectio
         areas[2],
     );
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,6 +376,20 @@ mod tests {
                 running,
             },
         }
+    }
+
+    #[test]
+    fn rejects_missing_clients_before_opening_the_terminal() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster-device.json")).unwrap();
+        let error = run_clients(&cluster, &[]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "Each node needs one client");
+    }
+
+    #[test]
+    fn rejects_empty_clusters_before_opening_the_terminal() {
+        let cluster = ClusterSpec { nodes: Vec::new() };
+        assert!(run_clients(&cluster, &[]).is_err());
     }
 
     #[test]

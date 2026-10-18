@@ -31,6 +31,19 @@ fn saved_path(home: &Path) -> std::path::PathBuf {
 }
 
 #[test]
+fn device_status_rejects_unknown_peers_without_using_another_saved_key() {
+    let home = private_home();
+    let key = public_file(home.path(), "known.pem");
+    assert!(run(home.path(), &["peers", "add", "known", key.to_str().unwrap()]).status.success());
+    let before = std::fs::read(saved_path(home.path())).unwrap();
+    let result = run(home.path(), &["status-device", "--address", "invalid-address", "--peer", "missing"]);
+    assert!(!result.status.success());
+    assert_eq!(result.stderr, b"Client error: Unknown peer: missing\n");
+    assert!(result.stdout.is_empty());
+    assert_eq!(std::fs::read(saved_path(home.path())).unwrap(), before);
+}
+
+#[test]
 fn lists_adds_reloads_and_removes_peers_without_creating_an_identity() {
     let home = private_home();
     let empty = run(home.path(), &["peers", "list"]);

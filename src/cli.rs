@@ -80,6 +80,12 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
+    /// Keep checking agents using their saved device keys.
+    WatchDevice {
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+
     /// Show live agent counts and scale the selected node with = or -.
     Dashboard {
         /// Path to the cluster manifest.
@@ -90,11 +96,55 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
+    /// Show and scale agents using their saved device keys.
+    DashboardDevice {
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+
     /// List, inspect, add, or remove approved device keys.
     Peers {
         #[command(subcommand)]
         command: PeerCommands,
     },
+
+    /// Run an agent using approved device keys instead of certificate files.
+    AgentDevice {
+        #[arg(long)]
+        listen: String,
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        allow_remote: bool,
+    },
+
+    /// Get an agent's status using its saved device key.
+    StatusDevice {
+        #[arg(long)]
+        address: String,
+        /// Name of the approved server in the saved peer list.
+        #[arg(long)]
+        peer: String,
+    },
+
+    /// Stop a workload using its saved device key, without stopping the agent.
+    StopDevice {
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        peer: String,
+    },
+
+    /// Change the workload copy count using the agent's saved device key.
+    ScaleDevice {
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        peer: String,
+        #[arg(long)]
+        replicas: u32,
+    }
+
 }
 
 /// Operations on the local list of approved device keys.

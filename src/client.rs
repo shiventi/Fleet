@@ -1,10 +1,13 @@
 //! Sends JSON commands over mutual TLS and prints the agent's replies.
 //!
-//! Each client loads `FLEET_TOKEN` and TLS files once. The token must match the agent's.
-//! Both sides verify certificates before any command or token is sent.
+//! Each client loads `FLEET_TOKEN` and its TLS config once. The token must match the agent's.
+//! TLS verifies the remote identity before any command or token is sent.
 
+use crate::device_tls;
+use crate::identity::DeviceIdentity;
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::tls::{self, TlsFiles};
+use crate::trust::TrustedPeer;
 use rustls::ClientConfig;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -28,6 +31,7 @@ pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<
 
 /// Holds a token and TLS config for repeated requests, including across threads.
 /// Each request opens a new connection. Create a new client to reload credentials.
+#[derive(Clone)]
 pub struct FleetClient {
     token: String,
     config: Arc<ClientConfig>,
@@ -39,16 +43,7 @@ impl FleetClient {
     /// # Errors
     /// Returns an error if the token is missing or blank, or the TLS files cannot be loaded.
     pub fn new(files: &TlsFiles) -> io::Result<Self> {
-        let token = std::env::var("FLEET_TOKEN")
-            .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
-
-        if token.trim().is_empty() {
-            return Err(io::Error::other("Your FLEET_TOKEN is blank"));
-        }
-
-        let config = Arc::new(tls::client_config(files)?);
-
-        Ok(Self { token, config })
+        Self::from_config(tls::client_config(files)?)
     }
     /// Gets the agent's status without printing it.
     ///
@@ -133,6 +128,43 @@ impl FleetClient {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
         }
+    }
+
+    /// Loads the shared token and stores the supplied TLS config.
+    fn from_config(config: ClientConfig) -> io::Result<Self> {
+        let token = std::env::var("FLEET_TOKEN").map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
+
+        if token.trim().is_empty() {
+            return Err(io::Error::other("Your FLEET_TOKEN is blank"));
+        }
+
+        Ok(Self { token, config: Arc::new(config) })
+    }
+
+    /// Loads a client using our device key and the selected server's approved key.
+    ///
+    /// # Errors
+    /// Returns an error if the token is missing or blank, or the keys cannot be loaded.
+    pub fn new_device(identity: &DeviceIdentity, peer: &TrustedPeer) -> io::Result<Self> {
+        Self::from_config(device_tls::client_config(identity, peer)?)
+    }
+
+    /// Loads our identity, the named approved server, and the shared token.
+    ///
+    /// # Errors
+    /// Returns an error if loading fails, the peer is unknown, or the token is invalid.
+    pub fn for_peer(peer_name: &str) -> io::Result<Self> {
+        let identity = DeviceIdentity::load_default()?;
+        let directory = crate::identity::default_directory()?;
+        let trust = crate::trust::TrustStore::load(&directory.join("trusted-peers.json"))?;
+
+        let saved_peer = match trust.peers().iter().find(|saved| saved.name == peer_name) {
+            Some(saved) => saved,
+            None => {
+                return Err(io::Error::new(io::ErrorKind::NotFound, format!("Unknown peer: {}", peer_name),))
+            }
+        };
+        Self::new_device(&identity, saved_peer)
     }
 }
 

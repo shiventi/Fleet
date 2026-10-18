@@ -11,6 +11,7 @@ mod runner;
 mod tls;
 mod workload;
 mod trust;
+mod device_tls;
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -267,6 +268,20 @@ fn main() {
             }
         }
 
+        Commands::WatchDevice { manifest } => {
+            let cluster = match load_cluster(&manifest) {
+                Ok(cluster) => cluster,
+                Err(error) => {
+                    eprintln!("Cluster error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = controller::watch_device(&cluster) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
         Commands::Dashboard { manifest, tls } => {
             let cluster = match load_cluster(&manifest) {
                 Ok(cluster) => cluster,
@@ -279,6 +294,114 @@ fn main() {
             if let Err(error) = dashboard::run(&cluster, &tls) {
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
+            }
+        }
+
+        Commands::DashboardDevice { manifest } => {
+            let cluster = match load_cluster(&manifest) {
+                Ok(cluster) => cluster,
+                Err(error) => {
+                    eprintln!("Cluster error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+
+            if let Err(error) = dashboard::run_device(&cluster) {
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::AgentDevice { listen, manifest, allow_remote } => {
+            let desired = match load_manifest(&manifest) {
+                Ok(workload) => workload,
+                Err(error) => {
+                    eprintln!("Manifest error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+
+            let identity = match identity::DeviceIdentity::load_default() {
+                Ok(identity) => identity,
+                Err(error) => {
+                    eprintln!("Identity error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            let directory = match identity::default_directory() {
+                Ok(directory) => directory,
+                Err(error) => {
+                    eprintln!("Config directory error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            let peer_list = match trust::TrustStore::load(&directory.join("trusted-peers.json")) {
+                Ok(store) => store,
+                Err(error) => {
+                    eprintln!("Peer list error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = agent::allow_device_connection(&listen, desired, &identity, &peer_list, allow_remote) {
+                eprintln!("Agent error: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::StatusDevice { address, peer } => {
+            let client = match client::FleetClient::for_peer(&peer) {
+                Ok(client) => client,
+                Err(error) => {
+                    eprintln!("Client error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            match client.fetch_status(&address, "localhost") {
+                Ok(status) => {
+                    if let Some(name) = status.workload_name {
+                        println!("Workload: {}", name);
+                    }
+                    println!("Desired copies: {}", status.desired);
+                    println!("Running copies: {}", status.running);
+                }
+                Err(error) => {
+                    eprintln!("Failed to get status: {}", error);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::StopDevice { address, peer } => {
+            let client = match client::FleetClient::for_peer(&peer) {
+                Ok(client) => client,
+                Err(error) => {
+                    eprintln!("Client error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = client.stop(&address, "localhost") {
+                eprintln!("Failed to stop workload: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::ScaleDevice { address, peer, replicas } => {
+            let client = match client::FleetClient::for_peer(&peer) {
+                Ok(client) => client,
+                Err(error) => {
+                    eprintln!("Client error: {}", error);
+                    std::process::exit(1);
+                }
+            };
+            match client.scale(&address, replicas, "localhost") {
+                Ok(status) => {
+                    println!("Desired copies: {}", status.desired);
+                    println!("Running copies: {}", status.running);
+                }
+                Err(error) => {
+                    eprintln!("Failed to scale workload: {}", error);
+                    std::process::exit(1);
+                }
             }
         }
     }

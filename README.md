@@ -4,6 +4,7 @@
 
 Fleet is a Rust tool for running apps across your computers. The goal is to tell
 Fleet what to run and which computer should take over if the main one goes down.
+Each agent currently manages one workload, with up to 32 running copies.
 
 ## What works today
 
@@ -12,11 +13,14 @@ Fleet what to run and which computer should take over if the main one goes down.
 - `validate` checks a manifest without starting anything.
 - `identity` creates or reuses a saved device key and prints only its public key
   on macOS/Linux. `--fingerprint` prints its SHA-256 fingerprint instead.
-  Pairing and certificate-free connections are not connected yet.
+  Automatic pairing is not built yet.
 - `peers` lists, shows, adds, and removes saved device public keys.
-  This list does not control network access yet.
+  Device-key commands use this list to check remote identities.
 - `agent` runs a workload and restarts missing copies. `status` shows its name
   and real process counts over mutual TLS. Ctrl+C stops the agent's direct children.
+- `agent-device`, `status-device`, `stop-device`, `scale-device`, `watch-device`,
+  and `dashboard-device` use saved device keys instead of certificate files.
+  Both sides must approve each other's keys and share a token.
 - `stop` stops the workload without closing the agent. It sets the desired count
   to zero in memory; restarting the agent reloads the unchanged manifest.
 - `scale` changes the copy count while the agent runs, including starting again
@@ -32,12 +36,13 @@ Failed launches are reported instead of crashing Fleet. Both `run` and `agent`
 wait at least five seconds before retrying a failed launch. This delay does not
 apply to apps that start successfully and then exit.
 
-Agent commands require trusted client/server certificates and a shared `FLEET_TOKEN`.
-TLS encrypts commands and tokens; plaintext connections are rejected. The client
-checks the server's name. Missing or blank tokens prevent startup, and workloads
+Agent commands require mutual TLS and a shared `FLEET_TOKEN`. Certificate mode
+checks the server's name; device-key mode checks the selected peer's public key.
+TLS encrypts commands and tokens; plaintext connections are rejected.
+Missing or blank tokens prevent startup, and workloads
 do not inherit the token. `run` and `validate` need neither TLS files nor a token.
 
-The agent uses localhost by default. `--allow-remote` permits a specific remote
+Loopback addresses need no remote flag. `--allow-remote` permits a specific remote
 IP; use a private network such as Tailscale, with a firewall. Wildcard addresses
 are rejected. It handles one client at a time, with a five-second connection
 deadline and 16 KiB message limit. Failover and data transfer are still planned.
@@ -64,8 +69,8 @@ No token, certificate files, or OpenSSL command is needed for this command.
 It creates `~/.config/fleet/identity/device-key.pem` on first use and reuses it on
 later runs. Run it twice to confirm that the public key stays the same.
 The identity directory is private (`700`), and the key is owner-only
-(`600`). Only the public key or its fingerprint is printed. New identities are fully written before
-being published without replacing an existing key. Unsafe directories, symlinks,
+(`600`). Only the public key or its fingerprint is printed. New identities are
+fully written before being published without replacing an existing key. Unsafe directories, symlinks,
 damaged keys, and broad permissions return errors instead of being repaired silently.
 
 Fingerprints use `SHA256:` followed by 64 lowercase hex characters. They hash the
@@ -75,9 +80,9 @@ a matching fingerprint alone does not prove who owns the key.
 
 The key has no certificate expiry date. Keep it private and include it in protected
 backups; deleting it creates a different identity on next use. Never share it with
-another device. Saved identities can now be loaded into a Rustls signer, but are
-not used for connections yet. Remote commands still use the certificates and
-token below. Windows identity storage and pairing come later.
+another device. The device-key commands use these identities with TLS 1.3
+and a shared token. Certificate-based commands remain available too.
+Windows identity storage and automatic pairing come later.
 
 ### Approved peers
 
@@ -101,8 +106,48 @@ work on macOS/Linux without certificates or a token.
 `show` prints one peer's name, fingerprint, and public key without changing the
 list; missing names return an error. Its fingerprint should match the other
 device's `identity --fingerprint` output.
-Adding or removing a peer does not change the current certificate-based access;
-pairing and connecting this list to authentication are still separate work.
+In device-key mode, the agent accepts any client key on its approved list; the
+client accepts only the named server's key. Both still require the shared token.
+An approved client with the token can control the agent's workload; there are no
+read-only roles or per-command permissions yet.
+Restart the agent after changing its approvals. Existing connections are not
+revoked. Peer changes do not affect certificate-based access.
+
+### Try device-key connections
+
+Export each computer's public key with `identity` and approve it on the other
+computer using `peers add`. Compare fingerprints through a trusted channel first.
+Use a separate identity on each computer; never copy private keys between them.
+Set the same `FLEET_TOKEN` in both terminals, then run:
+
+```sh
+# On the agent computer:
+cargo run -- agent-device --listen 127.0.0.1:7070 --manifest examples/demo.json
+
+# On the client, using the saved name for the agent's key:
+cargo run -- status-device --address 127.0.0.1:7070 --peer my-server
+cargo run -- scale-device --address 127.0.0.1:7070 --peer my-server --replicas 2
+cargo run -- stop-device --address 127.0.0.1:7070 --peer my-server
+```
+
+These addresses are for local testing. Between computers, use the agent's specific
+reachable IP and add `--allow-remote` to the agent. Restrict access with a firewall.
+Stopping keeps the agent running; scale above zero to start the workload again.
+Counts may take another agent loop to reach a new target.
+
+For multiple agents, edit `examples/cluster-device.json` with their addresses and
+saved peer names, then use:
+
+```sh
+cargo run -- watch-device --manifest examples/cluster-device.json
+cargo run -- dashboard-device --manifest examples/cluster-device.json
+```
+
+Each node's `peer` selects its approved key; `name` is just its display label.
+The example peer names `local-one` and `local-two` must already be approved.
+Keep `server_name` as `localhost` in device-key manifests; this mode checks the
+selected key, not the hostname. Missing or unknown peers prevent startup, and
+wrong keys fail the connection. Clients load credentials once, in manifest order.
 
 ### Set up local credentials
 
@@ -154,7 +199,9 @@ cargo run -- dashboard --manifest examples/cluster.json \
   --ca-cert "$TLS/ca.crt" --cert "$TLS/client.crt" --private-key "$TLS/client.key"
 ```
 
-The screen shows the latest process counts or connection error. The example has
+The screen shows agents listed in your cluster manifest, which can run on different
+computers. It does not discover devices or list saved peers automatically.
+Each row shows the latest process counts or connection error. The example has
 two agents; start another on port `7071` to connect both. Stop and restart an
 agent to see its row update automatically. A failed check does not prove the app stopped.
 
@@ -218,3 +265,18 @@ cargo build --locked
 ```
 
 Identity and peer tests use temporary directories, not your saved device keys.
+Run `cargo test --locked device_tls::tests` for the mutual device-key checks and
+in-memory handshakes; these open no network ports and change no saved identities.
+Run `cargo test --locked --test device_connection` for the real localhost test.
+It uses temporary identities and a temporary port, checks status and rejected
+keys/tokens, and verifies Ctrl+C stops the agent and its children.
+
+With `expect` installed, run the optional real-terminal test:
+
+```sh
+cargo test --locked --test device_connection device_dashboard_and_watch_use_the_right_key_for_each_agent -- --ignored
+```
+
+It starts two agents with different keys, drives dashboard selection and scaling,
+checks wrong-key rejection and watch output, and cleans up the temporary agents.
+`expect` is only needed for this test, not for running Fleet.
