@@ -1,0 +1,70 @@
+Stores device keys approved for the device-key agent and client commands.
+
+## TrustedPeer
+
+A device label and its public key, never its private key.
+
+## TrustedPeer::name
+
+A unique, printable device label.
+
+## TrustedPeer::public_key
+
+A validated P-256 public key in a consistent PEM format.
+
+## TrustStore
+
+Stores peers without duplicate names or public keys.
+
+## TrustStore::new
+
+Creates an empty store.
+
+## TrustStore::add
+
+Adds a valid P-256 public key, rejecting unsafe names and duplicates.
+
+## TrustStore::contains
+
+Checks a public key, ignoring PEM formatting differences.
+
+## TrustStore::to_json
+
+Encodes the peer list as JSON without private keys.
+
+## TrustStore::from_json
+
+Decodes JSON and checks every name and public key.
+
+## TrustStore::load
+
+Loads a private file, treating a missing file as an empty list.
+
+## TrustStore::save
+
+Saves a complete private file. Callers must lock around load, change, and save.
+
+## TrustStore::peers
+
+Borrows the approved peers without allowing changes.
+
+## TrustStore::remove
+
+Removes a named peer, returning whether one was found.
+
+## run
+
+Lists, shows, or changes saved peers while holding a separate file lock.
+Does not need certificates or a token. Restart device-key agents and clients to
+load approval changes; certificate-based access is unchanged.
+
+### Errors
+Returns file, validation, or locking errors. Unsupported platforms return an error.
+
+## normalize_public_key
+
+Validates Fleet's P-256 public key and stores it in one consistent PEM format.
+
+## read_public_key
+
+Reads a bounded public-key file without following symlinks or opening devices.

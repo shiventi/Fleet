@@ -1,0 +1,27 @@
+# Test Helpers
+
+## src/agent/tests.rs
+
+### TestWorkload
+
+Makes sure tests reap every child, even if an assertion fails.
+
+## src/device_tls/tests.rs
+
+### MissingClientKey
+
+Offers raw-key support but sends no identity when the server requests one.
+
+### transfer
+
+Exchanges actual TLS records in memory, without sockets or saved credentials.
+
+## tests/device_connection.rs
+
+### Agent
+
+Always stop the temporary agent, including when an assertion fails.
+
+### device_dashboard_and_watch_use_the_right_key_for_each_agent
+
+Drives the real terminal UI. Opt-in because it requires the expect executable.

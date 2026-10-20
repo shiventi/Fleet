@@ -1,0 +1,154 @@
+Command names, flags, and file paths accepted by Fleet.
+Run `fleet --help` or `fleet <command> --help` for usage.
+
+## Cli
+
+The command selected by the user.
+
+## Commands
+
+Operations supported by Fleet's command-line interface.
+
+## Commands::Run
+
+Run the application described by a manifest file.
+
+## Commands::Run::manifest
+
+Path to the application manifest.
+
+## Commands::Validate
+
+Check a manifest without starting any processes.
+
+## Commands::Validate::manifest
+
+Path to the application manifest.
+
+## Commands::Identity
+
+Create or reuse this device's identity and print its public key or fingerprint.
+
+## Commands::Identity::fingerprint
+
+Print the public key's SHA-256 fingerprint instead of its PEM text.
+
+## Commands::Agent
+
+Run a workload and accept commands over mutual TLS.
+
+## Commands::Agent::allow_remote
+
+Allow binding to a specific remote IP; use a private network.
+
+## Commands::Status
+
+Show a workload's current counts over mutual TLS.
+
+## Commands::Stop
+
+Stop the workload while keeping the agent running.
+
+## Commands::Stop::server_name
+
+Expected name in the agent's certificate, not its connection address.
+
+## Commands::Scale
+
+Change the number of copies managed by the agent.
+
+## Commands::Scale::server_name
+
+Expected name in the agent's certificate, not its connection address.
+
+## Commands::Watch
+
+Keep checking the agents listed in a cluster file.
+
+## Commands::WatchDevice
+
+Keep checking agents using their saved device keys.
+
+## Commands::Dashboard
+
+Show live agent counts and scale the selected node with = or -.
+
+## Commands::Dashboard::manifest
+
+Path to the cluster manifest.
+
+## Commands::Dashboard::tls
+
+Trusted CA and client identity used to check the agents.
+
+## Commands::DashboardDevice
+
+Show and scale agents using their saved device keys.
+
+## Commands::Peers
+
+List, inspect, add, or remove approved device keys.
+
+## Commands::AgentDevice
+
+Run an agent using approved device keys instead of certificate files.
+
+## Commands::StatusDevice
+
+Get an agent's status using its saved device key.
+
+## Commands::StatusDevice::peer
+
+Name of the approved server in the saved peer list.
+
+## Commands::StopDevice
+
+Stop a workload using its saved device key, without stopping the agent.
+
+## Commands::ScaleDevice
+
+Change the workload copy count using the agent's saved device key.
+
+## PeerCommands
+
+Operations on the local list of approved device keys.
+
+## PeerCommands::List
+
+Show approved device names.
+
+## PeerCommands::Add
+
+Add a device using its exported public key, never its private key.
+
+## PeerCommands::Add::name
+
+A unique label using ASCII letters, digits, hyphens, underscores, or dots.
+
+## PeerCommands::Add::public_key_file
+
+A public-key PEM file exported by the other device's identity command.
+
+## PeerCommands::Remove
+
+Remove a device from the saved list.
+
+## PeerCommands::Remove::name
+
+The saved device label to remove; this does not revoke TLS certificates.
+
+## PeerCommands::Show
+
+Show one saved device's name, fingerprint, and public key.
+
+## PeerCommands::Show::name
+
+The saved device label to inspect.
+
+## StatusArgs
+
+Connection address and trusted TLS identity for a status request.
+
+## StatusArgs::server_name
+
+Expected name in the agent's certificate, not its connection address.

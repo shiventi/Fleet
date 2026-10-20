@@ -1,0 +1,102 @@
+Creates TLS 1.3 configs that verify both devices using approved public keys.
+Used by device-key agent, control, watch, and dashboard commands.
+All commands still require a shared token; peer approvals are loaded at setup.
+
+## local_key
+
+Bundles our public key and signer without generating a certificate.
+The certificate-shaped container holds raw public-key DER bytes, not X.509.
+
+### Errors
+Returns an error if the signer cannot be loaded or has no public key.
+
+## PinnedServerVerifier
+
+Verifies one approved P-256 server key and its TLS 1.3 handshake signature.
+Identifies the server by its pinned key, not a certificate hostname or expiry.
+Does not authenticate clients or load the approved peer list itself.
+
+## PinnedServerVerifier::new
+
+Copies the expected key from a peer selected from the approved list.
+The caller must select the intended server, not an arbitrary approved peer.
+
+### Errors
+Returns an error for malformed, private, or unsupported keys.
+
+## PinnedServerVerifier::check_key
+
+Rejects any presented key whose full DER bytes differ from the approved key.
+
+## PinnedServerVerifier::verify_server_cert
+
+Approves the pinned raw key and rejects extra certificate-chain entries.
+Rustls checks proof of private-key ownership in the signature callback.
+
+## PinnedServerVerifier::verify_tls13_signature
+
+Checks the pinned key, then delegates handshake signature checking to Rustls.
+
+## PinnedServerVerifier::verify_tls12_signature
+
+Rejects TLS 1.2. Device-key configurations must also require TLS 1.3.
+
+## PinnedServerVerifier::supported_verify_schemes
+
+Advertises the P-256/SHA-256 signature scheme used by device identities.
+
+## PinnedServerVerifier::requires_raw_public_keys
+
+Requests raw public keys rather than X.509 certificates.
+
+## TrustedClientVerifier::new
+
+Copies the approved client keys. Rebuild after changing the peer list.
+
+### Errors
+Returns an error if the list is empty or a key cannot be parsed.
+
+## TrustedClientVerifier::check_key
+
+Rejects keys that are not in the copied approval list.
+
+## TrustedClientVerifier::verify_client_cert
+
+Requires one approved raw key, without a certificate chain.
+
+## TrustedClientVerifier::verify_tls13_signature
+
+Checks that the client owns the private key for its approved public key.
+
+## TrustedClientVerifier::verify_tls12_signature
+
+Rejects TLS 1.2. Device-key configurations must also require TLS 1.3.
+
+## TrustedClientVerifier::supported_verify_schemes
+
+Advertises the P-256/SHA-256 signature scheme used by device identities.
+
+## TrustedClientVerifier::requires_raw_public_keys
+
+Requests raw public keys rather than X.509 certificates.
+
+## TrustedClientVerifier
+
+Requires clients to prove ownership of a key in the supplied approval list.
+Approvals are copied at setup; changing the store does not update this verifier.
+
+## server_config
+
+Presents our device key and requires an approved client key using TLS 1.3.
+Rebuild after changing approvals. Existing connections are not revoked.
+
+### Errors
+Returns an error if the keys or TLS configuration cannot be loaded.
+
+## client_config
+
+Presents our device key and accepts only the selected server's key using TLS 1.3.
+The caller must select the intended peer from its approved list.
+
+### Errors
+Returns an error if the keys or TLS configuration cannot be loaded.

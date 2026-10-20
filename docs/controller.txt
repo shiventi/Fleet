@@ -1,0 +1,77 @@
+Checks the status of agents listed in a cluster file.
+
+## NodeSpec
+
+One agent to check.
+
+## NodeSpec::name
+
+A label shown in the watcher output.
+
+## NodeSpec::address
+
+The agent's numeric IP address and port.
+
+## NodeSpec::server_name
+
+The name expected in the agent's certificate.
+
+## NodeSpec::peer
+
+Saved device name used by device-key connections; optional in certificate mode.
+
+## ClusterSpec
+
+The agents listed in a cluster file.
+
+## ClusterSpec::nodes
+
+Agents checked during each round.
+
+## watch
+
+Checks agents in batches of up to four and pauses two seconds after each round.
+
+Failed checks are printed without ending the loop. Each batch runs its checks
+together and finishes before the next batch starts. Ctrl+C ends this watcher,
+not the agents or their workloads.
+One client shares the loaded token and TLS config across all checks.
+Restart the watcher to load changed credentials. Each check opens a new connection.
+This function does not start, stop, or move workloads.
+
+### Errors
+Returns an error if the cluster is invalid, the token is missing or blank,
+or the local TLS files cannot be loaded.
+
+## watch_device
+
+Watches each node using its named, approved device key and the shared token.
+Restart the watcher to reload keys or approvals. Leaves agents running.
+
+### Errors
+Returns an error if the cluster, peer names, saved keys, or token are invalid.
+
+## watch_clients
+
+Checks matching nodes and clients in batches of up to four.
+
+## check_node
+
+Checks one agent and prints its counts or an error.
+
+## ClusterSpec::validate
+
+Checks that the cluster has nodes with names and usable IP addresses and ports.
+
+This does not contact agents or check their certificates.
+
+### Errors
+Returns a message if the cluster is empty, a name is blank, or an address
+is invalid, has port zero, or uses a wildcard IP.
+
+## ClusterSpec::device_clients
+
+Loads one client per node, in manifest order, using each node's approved peer.
+
+### Errors
+Returns an error if validation, peer lookup, key loading, or token loading fails.

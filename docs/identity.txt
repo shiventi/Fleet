@@ -1,0 +1,81 @@
+Stores device identities, fingerprints public keys, and prepares Rustls signers.
+Device-key commands use these identities for mutual TLS.
+
+## DeviceIdentity
+
+Holds a device's signing keys. Never print or share the private key.
+
+## DeviceIdentity::generate
+
+Generates an unsaved identity, returning any key-generation error.
+
+## DeviceIdentity::public_key_pem
+
+Returns only the public key as readable PEM text.
+
+## DeviceIdentity::load
+
+Loads a private key, rejecting unsafe files, invalid keys, or read errors.
+
+## DeviceIdentity::save_new
+
+Saves a complete key without overwriting. Requires a private parent directory.
+Returns file, permission, or sync errors.
+
+## DeviceIdentity::load_or_create
+
+Reuses a saved key or creates a missing one. Other errors are returned unchanged.
+
+## DeviceIdentity::load_default
+
+Creates private storage in ~/.config/fleet/identity and reuses its key.
+Stores device-key.pem and never prints the private key.
+Returns storage errors; non-Unix platforms are not supported yet.
+
+## DeviceIdentity::signing_key
+
+Loads this identity into Rustls's signer without changing the saved key.
+Does not open a connection or approve any peer.
+
+### Errors
+Returns an error if Rustls cannot load the private key.
+
+## fingerprint
+
+Returns SHA256: followed by 64 lowercase hexadecimal characters for a P-256 key.
+Hashes standard DER bytes so PEM whitespace and line endings do not matter.
+Compare the full value through a trusted channel; it does not prove ownership.
+
+### Errors
+Returns an error for invalid PEM, private keys, or unsupported key types.
+
+## default_directory
+
+Finds and prepares private storage without creating a device key.
+Returns storage errors; non-Unix platforms are not supported yet.
+
+## prepare_directory
+
+Creates or checks private storage without creating a device key.
+
+## check_directory
+
+Rejects symlinks and directories that another user could change.
+
+## write_private
+
+Writes a complete, owner-only file in a private directory.
+Existing files must be safe text files no larger than 1 MiB to be replaced.
+
+## read_private
+
+Reads bounded text from a regular, owner-only file in a private directory.
+
+## lock_private
+
+Locks a separate private file until the returned handle is dropped.
+Keep the lock file in place so all callers lock the same file.
+
+## ensure_directory
+
+New directories are private; existing unsafe directories are rejected, not modified.

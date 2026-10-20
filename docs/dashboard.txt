@@ -1,0 +1,95 @@
+Shows live agent status and sends scale commands from a terminal table.
+
+## run
+
+Shows configured nodes while collecting their status in the background.
+Up/Down selects a node; = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
+Only one scale command can be pending. Command results appear below the table.
+Scaling changes the agent's in-memory target, not its manifest file.
+q, Esc, or Ctrl+C closes the screen and restores the terminal.
+Rows show the latest reply or connection error, not application health.
+Checks run one at a time, with a two-second pause after each round.
+Credentials are loaded once. Quitting waits for the current check or pause
+and leaves agents running.
+
+### Errors
+Returns an error if credentials cannot be loaded or terminal I/O fails.
+
+### Panics
+Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
+
+## run_device
+
+Shows and scales agents using each node's named, approved device key.
+Uses the same controls as certificate mode. Quitting leaves agents running.
+
+### Errors
+Returns an error if the cluster, credentials, or terminal I/O are invalid.
+
+### Panics
+Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
+
+## run_clients
+
+Runs the shared screen with one prepared client per node, in manifest order.
+
+## poll_nodes
+
+Checks each node and sends its index and latest result to the screen.
+Stops when requested or when the screen's receiver is dropped.
+
+## scale_worker
+
+Receives scale commands and sends their replies back without printing.
+
+## apply_poll
+
+Ignores checks started before the last scale reply or while scaling this node.
+
+## scale_key
+
+Legacy terminals report Ctrl-minus as Ctrl+7 or Ctrl+_.
+
+## scale_command
+
+Builds a scale request from the selected node's latest target, not its running count.
+
+## draw
+
+Draws each node's latest state, hiding addresses on narrow terminals.
+Long messages are clipped to the available column width.
+
+### Panics
+Panics if there is no state entry for a configured node.
+
+## NodeState
+
+The latest result of checking an agent, not the health of its application.
+
+## NodeState::NotChecked
+
+No check has finished for this node yet.
+
+## NodeState::Connected
+
+The agent replied with its process counts.
+
+## NodeState::Unreachable
+
+The check failed, including connection, TLS, or authentication errors.
+
+## ScaleCommand
+
+The selected node and its requested target count.
+
+## ScaleResult
+
+A scale reply and its completion time, used to discard older checks.
+
+## PollResult
+
+A timed check lets the screen discard replies made stale by a scale command.
+
+## ShutdownFlag
+
+Stops workers even if setting up or drawing the terminal panics.

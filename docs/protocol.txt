@@ -1,0 +1,62 @@
+Shared types for JSON messages between the client and agent.
+
+Requests include a shared token. Each message ends with a newline.
+Messages are carried over mutual TLS, which encrypts the token and commands.
+
+## StatusResponse
+
+The agent's status, sent as JSON on one line.
+
+## StatusResponse::workload_name
+
+The managed workload's name, or `None` when there is no workload.
+
+## StatusResponse::desired
+
+The requested number of running copies.
+
+## StatusResponse::running
+
+The number of copies observed running.
+
+## Request
+
+A client command carried inside an authenticated request.
+
+## Request::Status
+
+Ask for the current workload and counts.
+
+## Request::Stop
+
+Set the target to zero and stop all copies.
+
+## Request::Scale
+
+Change the target; the agent adjusts processes on its next loop.
+
+## Response
+
+An agent reply: current status or a reason the request was rejected.
+
+## Response::Status
+
+The workload and current counts.
+
+## Response::Error
+
+A readable error message.
+
+## AuthenticatedRequest
+
+A command and the shared token needed to run it.
+
+Debug printing is not derived to avoid accidentally logging the token.
+
+## AuthenticatedRequest::token
+
+The secret read from `FLEET_TOKEN`. Do not log it.
+
+## AuthenticatedRequest::request
+
+The command to handle after checking the token.

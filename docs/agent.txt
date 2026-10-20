@@ -1,0 +1,89 @@
+Manages workload copies and handles commands over mutual TLS.
+
+## ManagedWorkload
+
+Keeps one app's settings, processes, and launch retry time together.
+
+## ManagedWorkload::new
+
+Creates app state without starting processes. The caller validates the spec.
+
+## ManagedWorkload::tick
+
+Checks processes once and adds or removes copies to match this app's target.
+Failed launches wait five seconds before retrying; shutdown stops actions.
+Does not sleep or handle network requests.
+
+### Panics
+Panics if a process cannot be checked or stopped, or its count exceeds u32.
+
+## ManagedWorkload::status
+
+Returns this app's target and current process count.
+
+## ManagedWorkload::stop
+
+Sets the target to zero, stops this app's processes, and returns its status.
+
+## ManagedWorkload::scale
+
+Changes this app's target. The next tick adjusts its processes.
+
+### Errors
+Rejects counts above the limit without changing the target.
+
+## allow_connection
+
+Runs an agent using trusted client certificates and a shared token.
+
+### Errors
+Returns an error if TLS setup or agent startup fails.
+
+### Panics
+Panics if a process cannot be checked or stopped, or its count exceeds u32.
+
+## allow_device_connection
+
+Runs an agent using approved client device keys and a shared token.
+Approvals are copied at startup; restart the agent after changing them.
+
+### Errors
+Returns an error if device-key setup or agent startup fails.
+
+### Panics
+Panics if a process cannot be checked or stopped, or its count exceeds u32.
+
+## serve
+
+Adds or removes copies and handles commands using the supplied TLS config.
+
+Ctrl+C ends the loop and stops direct child processes.
+Failed launches are logged and retried after at least five seconds.
+The agent keeps handling commands during this delay.
+Client I/O can delay checks for up to five seconds per connection.
+Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
+Requires an authenticated TLS client. Remote addresses need `allow_remote`.
+Wildcard addresses such as `0.0.0.0` and `::` are rejected.
+
+### Errors
+Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
+or the listener or Ctrl+C handler cannot be set up.
+Later connection errors are logged and the loop continues.
+
+### Panics
+Panics if a process cannot be checked or stopped, or its count exceeds u32.
+
+## send_reply
+
+Sends one JSON reply followed by a newline.
+
+### Errors
+Returns an error if encoding or writing fails.
+
+## handle_client
+
+Checks the request's token before handling its command.
+
+### Errors
+Returns an error if reading, writing, or encoding fails.
+Invalid requests or wrong tokens receive an error reply without changing the workload.

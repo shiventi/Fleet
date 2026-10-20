@@ -1,0 +1,59 @@
+Runs workloads, controls agents, and watches their status.
+
+## ObservedWorkload
+
+The reported number of running copies of a workload.
+
+## ObservedWorkload::name
+
+The workload this observation belongs to.
+
+## ObservedWorkload::running
+
+The number of copies observed alive during this check.
+
+## Action
+
+A requested change to a workload's running copies.
+
+## Action::Start
+
+Requests one additional copy of the named workload.
+
+## Action::Stop
+
+Requests one fewer running copy.
+
+## plan
+
+Decides what to start or stop without running anything.
+
+### Panics
+Panics if the desired and observed workload names differ.
+
+## supervise
+
+Repeatedly observes the supplied workload and starts missing copies.
+Failed launches are logged and retried after at least five seconds.
+
+## load_manifest
+
+Reads and validates a JSON manifest without starting any processes.
+
+### Errors
+Returns an error if the file cannot be read, deserialized, or validated.
+
+## load_agent_manifest
+
+Reads and validates a multi-app manifest without starting any processes.
+Live commands still use the single-app loader until multi-app wiring is ready.
+
+### Errors
+Returns a filename and reason if reading, parsing, or validation fails.
+
+## load_cluster
+
+Reads and validates a cluster JSON file without contacting its agents.
+
+### Errors
+Returns an error if reading, parsing, or validating the file fails.

@@ -1,16 +1,28 @@
 #![doc = include_str!("../docs/fleet.txt")]
 
+#[doc = include_str!("../docs/agent.txt")]
 mod agent;
+#[doc = include_str!("../docs/cli.txt")]
 mod cli;
+#[doc = include_str!("../docs/client.txt")]
 mod client;
+#[doc = include_str!("../docs/controller.txt")]
 mod controller;
+#[doc = include_str!("../docs/dashboard.txt")]
 mod dashboard;
+#[doc = include_str!("../docs/identity.txt")]
 mod identity;
+#[doc = include_str!("../docs/protocol.txt")]
 mod protocol;
+#[doc = include_str!("../docs/runner.txt")]
 mod runner;
+#[doc = include_str!("../docs/tls.txt")]
 mod tls;
+#[doc = include_str!("../docs/workload.txt")]
 mod workload;
+#[doc = include_str!("../docs/trust.txt")]
 mod trust;
+#[doc = include_str!("../docs/device_tls.txt")]
 mod device_tls;
 
 use clap::Parser;

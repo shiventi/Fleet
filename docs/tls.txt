@@ -1,0 +1,77 @@
+Loads certificates and opens encrypted connections with a fixed deadline.
+
+## CONNECTION_TIMEOUT
+
+Maximum socket I/O time for the handshake, command, and reply together.
+
+## MAX_MESSAGE_BYTES
+
+Maximum message size, including its final newline.
+
+## TlsFiles
+
+Paths to trusted CA certificates, our certificate, and our private key.
+
+## TlsFiles::ca_cert
+
+CA certificates trusted to sign the other side's identity.
+
+## TlsFiles::cert
+
+Our certificate chain in PEM format.
+
+## TlsFiles::private_key
+
+Our private key in PEM format. Keep this file private.
+
+## load_certificates
+
+Loads certificates, returning an error for unreadable or empty files.
+Loading does not establish trust; TLS verifies the peer later.
+
+## load_private_key
+
+Loads the first private key, rejecting missing keys or broad Unix permissions.
+
+## load_roots
+
+Loads trusted CA certificates, rejecting invalid certificates.
+
+## server_config
+
+Requires a trusted client certificate and supplies the agent's identity.
+Every accepted client still needs the shared token to run commands.
+
+## client_config
+
+Verifies the agent's certificate and supplies the client's identity.
+
+## ServerStream
+
+An agent-side TLS connection with bounded socket I/O.
+
+## ClientStream
+
+A client-side TLS connection with bounded socket I/O.
+
+## accept
+
+Completes client authentication before any command is read.
+
+## connect
+
+Connects to a numeric IP and verifies the expected server name.
+Uses an already-loaded config and opens a new connection with a fixed deadline.
+
+### Errors
+Returns an error if the address or server name is invalid, connecting fails,
+or the TLS handshake fails.
+
+## read_message
+
+Reads one newline-terminated message without allowing unlimited allocation.
+Returns an error for oversized, incomplete, or invalid UTF-8 messages.
+
+## DeadlineStream
+
+Limits socket I/O to one deadline across the handshake, command, and reply.

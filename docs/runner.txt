@@ -1,0 +1,40 @@
+Launches local processes and checks whether they are still running.
+
+## ProcessRunner
+
+Stores handles to processes launched by Fleet.
+
+Finished handles are removed when `running_count` checks the list.
+
+## ProcessRunner::children
+
+Handles used to inspect the launched processes.
+
+## ProcessRunner::new
+
+Creates an empty runner without starting any processes.
+
+## ProcessRunner::start
+
+Starts one copy of the workload and stores its process handle.
+The child does not inherit Fleet's control token.
+
+### Errors
+Returns an error if the program cannot be launched.
+
+## ProcessRunner::running_count
+
+Checks processes without waiting and removes handles for exited processes.
+
+Returns the number of handles whose processes were observed still running.
+
+### Panics
+Panics if a process status check fails.
+
+## ProcessRunner::stop_one
+
+Force-stops one tracked process and collects its exit status.
+Does nothing when no handles remain.
+
+### Panics
+Panics if stopping or waiting for the process fails.
