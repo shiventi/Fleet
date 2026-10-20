@@ -6,6 +6,12 @@ Fleet is a Rust tool for running apps across your computers. The goal is to tell
 Fleet what to run and which computer should take over if the main one goes down.
 Each agent currently manages one workload, with up to 32 running copies.
 
+## Documentation
+
+Developer explanations live in [docs/fleet.txt](docs/fleet.txt), outside the code.
+The same file appears on the Rustdocs home page. Keep future module and API notes
+there; CLI help text stays in Clap settings so `--help` continues to work.
+
 ## What works today
 
 - `run` reads a JSON file, starts the requested copies, and restarts them when

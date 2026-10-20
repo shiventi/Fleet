@@ -1,8 +1,3 @@
-//! Sends JSON commands over mutual TLS and prints the agent's replies.
-//!
-//! Each client loads `FLEET_TOKEN` and its TLS config once. The token must match the agent's.
-//! TLS verifies the remote identity before any command or token is sent.
-
 use crate::device_tls;
 use crate::identity::DeviceIdentity;
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
@@ -12,10 +7,6 @@ use rustls::ClientConfig;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-/// Gets the agent's status and prints its name and copy counts.
-///
-/// # Errors
-/// Returns an error if fetching the status fails.
 pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let status = fetch_status(address, server_name, files)?;
 
@@ -29,8 +20,7 @@ pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<
     Ok(())
 }
 
-/// Holds a token and TLS config for repeated requests, including across threads.
-/// Each request opens a new connection. Create a new client to reload credentials.
+// share tls setup across calls
 #[derive(Clone)]
 pub struct FleetClient {
     token: String,
@@ -38,18 +28,9 @@ pub struct FleetClient {
 }
 
 impl FleetClient {
-    /// Loads the token and TLS files without connecting to an agent.
-    ///
-    /// # Errors
-    /// Returns an error if the token is missing or blank, or the TLS files cannot be loaded.
     pub fn new(files: &TlsFiles) -> io::Result<Self> {
         Self::from_config(tls::client_config(files)?)
     }
-    /// Gets the agent's status without printing it.
-    ///
-    /// # Errors
-    /// Returns an error if connecting, sending, reading, or parsing fails,
-    /// or the agent rejects the request.
     pub fn fetch_status(&self, address: &str, server_name: &str) -> io::Result<StatusResponse> {
         let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
         let request = AuthenticatedRequest {
@@ -70,13 +51,6 @@ impl FleetClient {
         }
     }
 
-    /// Asks the agent to stop its workload and prints the updated counts.
-    ///
-    /// The agent stays running and the manifest file is unchanged.
-    ///
-    /// # Errors
-    /// Returns an error if connecting, sending, reading, or parsing fails,
-    /// or the agent rejects the request.
     pub fn stop(&self, address: &str, server_name: &str) -> io::Result<()> {
         let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
         let request = AuthenticatedRequest {
@@ -103,12 +77,6 @@ impl FleetClient {
         Ok(())
     }
 
-    /// Sets the desired copy count and returns the agent's current counts without printing.
-    /// The running count may take another agent loop to reach the target.
-    ///
-    /// # Errors
-    /// Returns an error if connecting, sending, reading, or parsing fails,
-    /// or the agent rejects the request.
     pub fn scale(&self, address: &str, replicas: u32, server_name: &str) -> io::Result<StatusResponse> {
         let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
         let request = AuthenticatedRequest {
@@ -130,7 +98,6 @@ impl FleetClient {
         }
     }
 
-    /// Loads the shared token and stores the supplied TLS config.
     fn from_config(config: ClientConfig) -> io::Result<Self> {
         let token = std::env::var("FLEET_TOKEN").map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -141,18 +108,10 @@ impl FleetClient {
         Ok(Self { token, config: Arc::new(config) })
     }
 
-    /// Loads a client using our device key and the selected server's approved key.
-    ///
-    /// # Errors
-    /// Returns an error if the token is missing or blank, or the keys cannot be loaded.
     pub fn new_device(identity: &DeviceIdentity, peer: &TrustedPeer) -> io::Result<Self> {
         Self::from_config(device_tls::client_config(identity, peer)?)
     }
 
-    /// Loads our identity, the named approved server, and the shared token.
-    ///
-    /// # Errors
-    /// Returns an error if loading fails, the peer is unknown, or the token is invalid.
     pub fn for_peer(peer_name: &str) -> io::Result<Self> {
         let identity = DeviceIdentity::load_default()?;
         let directory = crate::identity::default_directory()?;
@@ -168,28 +127,16 @@ impl FleetClient {
     }
 }
 
-/// Loads a client and gets one agent's status without printing it.
-///
-/// # Errors
-/// Returns an error if client setup or the status request fails.
 pub fn fetch_status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<StatusResponse> {
     let client = FleetClient::new(files)?;
     return client.fetch_status(address, server_name);
 }
 
-/// Loads a client, stops the workload, and prints the updated counts.
-///
-/// # Errors
-/// Returns an error if client setup or the stop request fails.
 pub fn stop(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
     return client.stop(address, server_name);
 }
 
-/// Loads a client, sets the desired copy count, and prints the current counts.
-///
-/// # Errors
-/// Returns an error if client setup or the scale request fails.
 pub fn scale(address: &str, replicas: u32, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
     let status = client.scale(address, replicas, server_name)?;

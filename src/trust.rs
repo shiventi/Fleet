@@ -1,4 +1,3 @@
-//! Stores device keys approved for the device-key agent and client commands.
 use crate::cli::PeerCommands;
 use p256::pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding};
 use serde::{Deserialize, Serialize};
@@ -8,27 +7,21 @@ use std::path::Path;
 const MAX_KEY_BYTES: usize = 16 * 1024;
 const MAX_STORE_BYTES: usize = 1024 * 1024;
 
-/// A device label and its public key, never its private key.
 #[derive(Serialize, Deserialize)]
 pub struct TrustedPeer {
-    /// A unique, printable device label.
     pub name: String,
-    /// A validated P-256 public key in a consistent PEM format.
     pub public_key: String,
 }
 
-/// Stores peers without duplicate names or public keys.
 pub struct TrustStore {
     peers: Vec<TrustedPeer>,
 }
 
 impl TrustStore {
-    /// Creates an empty store.
     pub fn new() -> Self {
         Self { peers: Vec::new() }
     }
 
-    /// Adds a valid P-256 public key, rejecting unsafe names and duplicates.
     pub fn add(&mut self, mut peer: TrustedPeer) -> Result<(), String> {
         if peer.name.is_empty()
             || peer.name.len() > 64
@@ -57,7 +50,6 @@ impl TrustStore {
         Ok(())
     }
 
-    /// Checks a public key, ignoring PEM formatting differences.
     pub fn contains(&self, public_key: &str) -> bool {
         match normalize_public_key(public_key) {
             Ok(key) => self.peers.iter().any(|peer| peer.public_key == key),
@@ -65,12 +57,10 @@ impl TrustStore {
         }
     }
 
-    /// Encodes the peer list as JSON without private keys.
     pub fn to_json(&self) -> io::Result<String> {
         serde_json::to_string_pretty(&self.peers).map_err(io::Error::other)
     }
 
-    /// Decodes JSON and checks every name and public key.
     pub fn from_json(contents: &str) -> io::Result<Self> {
         if contents.len() > MAX_STORE_BYTES {
             return Err(io::Error::new(
@@ -88,7 +78,6 @@ impl TrustStore {
         Ok(store)
     }
 
-    /// Loads a private file, treating a missing file as an empty list.
     #[cfg(unix)]
     pub fn load(path: &Path) -> io::Result<Self> {
         match crate::identity::read_private(path, MAX_STORE_BYTES as u64) {
@@ -98,7 +87,6 @@ impl TrustStore {
         }
     }
 
-    /// Saves a complete private file. Callers must lock around load, change, and save.
     #[cfg(unix)]
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let json = self.to_json()?;
@@ -111,12 +99,10 @@ impl TrustStore {
         crate::identity::write_private(path, json.as_bytes(), true)
     }
 
-    /// Borrows the approved peers without allowing changes.
     pub fn peers(&self) -> &[TrustedPeer] {
         &self.peers
     }
 
-    /// Removes a named peer, returning whether one was found.
     pub fn remove(&mut self, name: &str) -> bool {
         let before = self.peers.len();
         self.peers.retain(|peer| peer.name != name);
@@ -125,15 +111,11 @@ impl TrustStore {
     }
 }
 
-/// Lists, shows, or changes saved peers while holding a separate file lock.
-/// Does not need certificates or a token and does not change network access yet.
-///
-/// # Errors
-/// Returns file, validation, or locking errors. Unsupported platforms return an error.
 pub fn run(command: PeerCommands) -> io::Result<()> {
     #[cfg(unix)]
     {
         let directory = crate::identity::default_directory()?;
+        // lock the list while we change it
         let _lock = crate::identity::lock_private(&directory.join("trusted-peers.lock"))?;
         let path = directory.join("trusted-peers.json");
         let mut store = TrustStore::load(&path)?;
@@ -199,7 +181,6 @@ pub fn run(command: PeerCommands) -> io::Result<()> {
     }
 }
 
-/// Validates Fleet's P-256 public key and stores it in one consistent PEM format.
 fn normalize_public_key(contents: &str) -> io::Result<String> {
     if contents.len() > MAX_KEY_BYTES {
         return Err(io::Error::new(
@@ -217,7 +198,6 @@ fn normalize_public_key(contents: &str) -> io::Result<String> {
         .map_err(io::Error::other)
 }
 
-/// Reads a bounded public-key file without following symlinks or opening devices.
 #[cfg(unix)]
 fn read_public_key(path: &Path) -> io::Result<String> {
     use std::io::Read;

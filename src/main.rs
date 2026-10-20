@@ -1,4 +1,4 @@
-//! Runs workloads, controls agents, and watches their status.
+#![doc = include_str!("../docs/fleet.txt")]
 
 mod agent;
 mod cli;
@@ -20,30 +20,20 @@ use runner::ProcessRunner;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use workload::WorkloadSpec;
+use workload::{AgentManifest, WorkloadSpec};
 
-/// The reported number of running copies of a workload.
 #[derive(Debug)]
 struct ObservedWorkload {
-    /// The workload this observation belongs to.
     name: String,
-    /// The number of copies observed alive during this check.
     running: u32,
 }
 
-/// A requested change to a workload's running copies.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
-    /// Requests one additional copy of the named workload.
     Start { workload_name: String },
-    /// Requests one fewer running copy.
     Stop { workload_name: String },
 }
 
-/// Decides what to start or stop without running anything.
-///
-/// # Panics
-/// Panics if the desired and observed workload names differ.
 fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
     assert_eq!(
         desired.name, observed.name,
@@ -69,8 +59,6 @@ fn plan(desired: &WorkloadSpec, observed: &ObservedWorkload) -> Vec<Action> {
     }
 }
 
-/// Repeatedly observes the supplied workload and starts missing copies.
-/// Failed launches are logged and retried after at least five seconds.
 fn supervise(desired: WorkloadSpec) {
     let mut runner = ProcessRunner::new();
     let keep_alive = Arc::new(AtomicBool::new(true));
@@ -119,10 +107,6 @@ fn supervise(desired: WorkloadSpec) {
     runner.stop_all();
 }
 
-/// Reads and validates a JSON manifest without starting any processes.
-///
-/// # Errors
-/// Returns an error if the file cannot be read, deserialized, or validated.
 fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
     let contents = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read file '{}': {}", path.display(), e))?;
@@ -137,10 +121,16 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
     Ok(desired)
 }
 
-/// Reads and validates a cluster JSON file without contacting its agents.
-///
-/// # Errors
-/// Returns an error if reading, parsing, or validating the file fails.
+//todo: wire this loader
+fn load_agent_manifest(path: &std::path::Path) -> Result<AgentManifest, String> {
+    let contents = std::fs::read_to_string(path).map_err(|err| format!("Failed to read file '{}': {}", path.display(), err))?;
+    let desired: AgentManifest = serde_json::from_str(&contents).map_err(|e| format!("Failed to parse JSON in '{}': {}", path.display(), e))?;
+
+    desired.validate().map_err(|err| format!("Invalid agent manifest '{}': {}", path.display(), err))?;
+
+    Ok(desired)
+}
+
 fn load_cluster(path: &std::path::Path) -> Result<ClusterSpec, String> {
     let contents = std::fs::read_to_string(path)
         .map_err(|err| format!("Failed to read cluster file: {}", err))?;
@@ -406,6 +396,9 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod manifest_tests;
 
 #[cfg(test)]
 mod tests {

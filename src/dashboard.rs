@@ -1,5 +1,3 @@
-//! Shows live agent status and sends scale commands from a terminal table.
-
 use crate::client::FleetClient;
 use crate::controller::ClusterSpec;
 use crate::protocol::StatusResponse;
@@ -17,41 +15,17 @@ use std::time::{Duration, Instant};
 
 const ACCENT: Color = Color::Rgb(50, 108, 229);
 
-/// Shows configured nodes while collecting their status in the background.
-/// Up/Down selects a node; = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
-/// Only one scale command can be pending. Command results appear below the table.
-/// Scaling changes the agent's in-memory target, not its manifest file.
-/// q, Esc, or Ctrl+C closes the screen and restores the terminal.
-/// Rows show the latest reply or connection error, not application health.
-/// Checks run one at a time, with a two-second pause after each round.
-/// Credentials are loaded once. Quitting waits for the current check or pause
-/// and leaves agents running.
-///
-/// # Errors
-/// Returns an error if credentials cannot be loaded or terminal I/O fails.
-///
-/// # Panics
-/// Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
 pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
     let clients = vec![client; cluster.nodes.len()];
     run_clients(cluster, &clients)
 }
 
-/// Shows and scales agents using each node's named, approved device key.
-/// Uses the same controls as certificate mode. Quitting leaves agents running.
-///
-/// # Errors
-/// Returns an error if the cluster, credentials, or terminal I/O are invalid.
-///
-/// # Panics
-/// Panics if Ratatui cannot set up the terminal. Run in an interactive terminal.
 pub fn run_device(cluster: &ClusterSpec) -> io::Result<()> {
     let clients = cluster.device_clients()?;
     run_clients(cluster, &clients)
 }
 
-/// Runs the shared screen with one prepared client per node, in manifest order.
 fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()> {
     cluster.validate().map_err(io::Error::other)?;
     if cluster.nodes.len() != clients.len() {
@@ -102,7 +76,7 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
                             states[result.index] = NodeState::Connected { status };
                         }
                         Err(message) => {
-                            // A lost reply may hide an applied command; require a fresh check.
+                            // a lost reply may hide a change
                             states[result.index] = NodeState::NotChecked;
                             notice = format!(
                                 "{}: scale failed: {}. Check status before retrying.",
@@ -179,8 +153,6 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
     })
 }
 
-/// Checks each node and sends its index and latest result to the screen.
-/// Stops when requested or when the screen's receiver is dropped.
 fn poll_nodes(cluster: &ClusterSpec, clients: &[FleetClient], sender: mpsc::Sender<PollResult>, keep_alive: &AtomicBool) {
     while keep_alive.load(Ordering::Relaxed) {
         for (index, (node, client)) in cluster.nodes.iter().zip(clients.iter()).enumerate() {
@@ -217,7 +189,6 @@ fn poll_nodes(cluster: &ClusterSpec, clients: &[FleetClient], sender: mpsc::Send
     }
 }
 
-/// Receives scale commands and sends their replies back without printing.
 fn scale_worker(cluster: &ClusterSpec, clients: &[FleetClient], receiver: mpsc::Receiver<ScaleCommand>, sender: mpsc::Sender<ScaleResult>, keep_alive: &AtomicBool) {
     while keep_alive.load(Ordering::Relaxed) {
         let command = match receiver.recv_timeout(Duration::from_millis(100)) {
@@ -248,14 +219,13 @@ fn scale_worker(cluster: &ClusterSpec, clients: &[FleetClient], receiver: mpsc::
     }
 }
 
-/// Ignores checks started before the last scale reply or while scaling this node.
 fn apply_poll(update: PollResult, states: &mut [NodeState], pending: Option<usize>, updated_after: &[Instant]) {
+    // ignore stale poll replies.
     if pending != Some(update.index) && update.started_at >= updated_after[update.index] {
         states[update.index] = update.state;
     }
 }
 
-/// Legacy terminals report Ctrl-minus as Ctrl+7 or Ctrl+_.
 fn scale_key(key: KeyEvent) -> KeyCode {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('7') | KeyCode::Char('_')) {
         KeyCode::Char('-')
@@ -264,7 +234,6 @@ fn scale_key(key: KeyEvent) -> KeyCode {
     }
 }
 
-/// Builds a scale request from the selected node's latest target, not its running count.
 fn scale_command(index: usize, key: KeyCode, states: &[NodeState]) -> Result<ScaleCommand, String> {
     let Some(NodeState::Connected { status }) = states.get(index) else {
         return Err(String::from(
@@ -285,11 +254,6 @@ fn scale_command(index: usize, key: KeyCode, states: &[NodeState]) -> Result<Sca
     Ok(ScaleCommand { index, replicas })
 }
 
-/// Draws each node's latest state, hiding addresses on narrow terminals.
-/// Long messages are clipped to the available column width.
-///
-/// # Panics
-/// Panics if there is no state entry for a configured node.
 fn draw(frame: &mut Frame, cluster: &ClusterSpec, states: &[NodeState], selection: &mut TableState, notice: &str) {
     let areas = Layout::vertical([
         Constraint::Length(3),
@@ -613,37 +577,29 @@ mod tests {
     }
 }
 
-/// The latest result of checking an agent, not the health of its application.
 pub enum NodeState {
-    /// No check has finished for this node yet.
     NotChecked,
-    /// The agent replied with its process counts.
     Connected { status: StatusResponse },
-    /// The check failed, including connection, TLS, or authentication errors.
     Unreachable { message: String },
 }
 
-/// The selected node and its requested target count.
 struct ScaleCommand {
     index: usize,
     replicas: u32,
 }
 
-/// A scale reply and its completion time, used to discard older checks.
 struct ScaleResult {
     index: usize,
     reply: Result<StatusResponse, String>,
     finished_at: Instant,
 }
 
-/// A timed check lets the screen discard replies made stale by a scale command.
 struct PollResult {
     index: usize,
     state: NodeState,
     started_at: Instant,
 }
 
-/// Stops workers even if setting up or drawing the terminal panics.
 struct ShutdownFlag<'a>(&'a AtomicBool);
 
 impl Drop for ShutdownFlag<'_> {

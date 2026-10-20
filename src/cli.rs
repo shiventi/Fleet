@@ -4,35 +4,35 @@ use clap::Parser;
 use clap::Subcommand;
 use std::path::PathBuf;
 
-/// The command selected by the user.
+// names and flags for the cli
 #[derive(Parser, Debug)]
+#[command(about = "run and check apps on your servers")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 }
 
-/// Operations supported by Fleet's command-line interface.
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Run the application described by a manifest file.
+    #[command(about = "run an app from a file")]
     Run {
-        /// Path to the application manifest.
+        #[arg(help = "app file")]
         manifest: PathBuf,
     },
-    /// Check a manifest without starting any processes.
+    #[command(about = "check an app file without running it")]
     Validate {
-        /// Path to the application manifest.
+        #[arg(help = "app file")]
         manifest: PathBuf,
     },
 
-    /// Create or reuse this device's identity and print its public key or fingerprint.
+    #[command(about = "show this device's public key")]
     Identity {
-        /// Print the public key's SHA-256 fingerprint instead of its PEM text.
+        #[arg(help = "show the key hash instead")]
         #[arg(long)]
         fingerprint: bool,
     },
 
-    /// Run a workload and accept commands over mutual TLS.
+    #[command(about = "run an app and take remote commands")]
     Agent {
         #[arg(long)]
         listen: String,
@@ -40,39 +40,39 @@ pub enum Commands {
         manifest: PathBuf,
         #[command(flatten)]
         tls: TlsFiles,
-        /// Allow binding to a specific remote IP; use a private network.
+        #[arg(help = "allow a remote IP; use a private network")]
         #[arg(long)]
         allow_remote: bool,
     },
 
-    /// Show a workload's current counts over mutual TLS.
+    #[command(about = "show an app's status")]
     Status(StatusArgs),
 
-    /// Stop the workload while keeping the agent running.
+    #[command(about = "stop the app, not the agent")]
     Stop {
         #[arg(long)]
         address: String,
-        /// Expected name in the agent's certificate, not its connection address.
+        #[arg(help = "name to check on the server cert")]
         #[arg(long, default_value = "localhost")]
         server_name: String,
         #[command(flatten)]
         tls: TlsFiles,
     },
 
-    /// Change the number of copies managed by the agent.
+    #[command(about = "set the app's copy count")]
     Scale {
         #[arg(long)]
         replicas: u32,
         #[arg(long)]
         address: String,
-        /// Expected name in the agent's certificate, not its connection address.
+        #[arg(help = "name to check on the server cert")]
         #[arg(long, default_value = "localhost")]
         server_name: String,
         #[command(flatten)]
         tls: TlsFiles,
     },
 
-    /// Keep checking the agents listed in a cluster file.
+    #[command(about = "watch the nodes in a file")]
     Watch {
         #[arg(long)]
         manifest: PathBuf,
@@ -80,35 +80,34 @@ pub enum Commands {
         tls: TlsFiles,
     },
 
-    /// Keep checking agents using their saved device keys.
+    #[command(about = "watch nodes with saved keys")]
     WatchDevice {
         #[arg(long)]
         manifest: PathBuf,
     },
 
-    /// Show live agent counts and scale the selected node with = or -.
+    #[command(about = "view nodes; use = or - to scale")]
     Dashboard {
-        /// Path to the cluster manifest.
+        #[arg(help = "node list file")]
         #[arg(long)]
         manifest: PathBuf,
-        /// Trusted CA and client identity used to check the agents.
         #[command(flatten)]
         tls: TlsFiles,
     },
 
-    /// Show and scale agents using their saved device keys.
+    #[command(about = "view and scale nodes with saved keys")]
     DashboardDevice {
         #[arg(long)]
         manifest: PathBuf,
     },
 
-    /// List, inspect, add, or remove approved device keys.
+    #[command(about = "list, show, add, or drop device keys")]
     Peers {
         #[command(subcommand)]
         command: PeerCommands,
     },
 
-    /// Run an agent using approved device keys instead of certificate files.
+    #[command(about = "run an agent with device keys")]
     AgentDevice {
         #[arg(long)]
         listen: String,
@@ -118,16 +117,16 @@ pub enum Commands {
         allow_remote: bool,
     },
 
-    /// Get an agent's status using its saved device key.
+    #[command(about = "check an app with its device key")]
     StatusDevice {
         #[arg(long)]
         address: String,
-        /// Name of the approved server in the saved peer list.
+        #[arg(help = "saved name for this server")]
         #[arg(long)]
         peer: String,
     },
 
-    /// Stop a workload using its saved device key, without stopping the agent.
+    #[command(about = "stop an app with its device key")]
     StopDevice {
         #[arg(long)]
         address: String,
@@ -135,7 +134,7 @@ pub enum Commands {
         peer: String,
     },
 
-    /// Change the workload copy count using the agent's saved device key.
+    #[command(about = "set app copies with its device key")]
     ScaleDevice {
         #[arg(long)]
         address: String,
@@ -147,37 +146,35 @@ pub enum Commands {
 
 }
 
-/// Operations on the local list of approved device keys.
 #[derive(Subcommand, Debug)]
 pub enum PeerCommands {
-    /// Show approved device names.
+    #[command(about = "list saved devices")]
     List,
-    /// Add a device using its exported public key, never its private key.
+    #[command(about = "trust a device's public key")]
     Add {
-        /// A unique label using ASCII letters, digits, hyphens, underscores, or dots.
+        #[arg(help = "name: letters, numbers, -, _, or .")]
         name: String,
-        /// A public-key PEM file exported by the other device's identity command.
+        #[arg(help = "public key file; never a private key")]
         public_key_file: PathBuf,
     },
 
-    /// Remove a device from the saved list.
+    #[command(about = "drop a saved device")]
     Remove {
-        /// The saved device label to remove; this does not revoke TLS certificates.
+        #[arg(help = "saved peer name; restart agents to apply")]
         name: String,
     },
-    /// Show one saved device's name, fingerprint, and public key.
+    #[command(about = "show a device's name, key hash, and public key")]
     Show {
-        /// The saved device label to inspect.
+        #[arg(help = "saved peer name")]
         name: String,
     },
 }
 
-/// Connection address and trusted TLS identity for a status request.
 #[derive(Args, Debug)]
 pub struct StatusArgs {
     #[arg(short, long)]
     pub address: String,
-    /// Expected name in the agent's certificate, not its connection address.
+    #[arg(help = "name to check on the server cert")]
     #[arg(long, default_value = "localhost")]
     pub server_name: String,
     #[command(flatten)]

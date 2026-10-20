@@ -62,7 +62,6 @@ fn wait_for_counts(home: &Path, address: &str, count: u32) {
     }
 }
 
-/// Always stop the temporary agent, including when an assertion fails.
 struct Agent {
     child: Child,
     log: PathBuf,
@@ -173,7 +172,7 @@ fn local_device_agent_checks_keys_and_tokens_and_shuts_down() {
         })
         .collect();
 
-    // Short-lived children also limit cleanup time if the test process is interrupted.
+    // keep test apps short in case the test stops
     let manifest = root.path().join("workload.json");
     fs::write(
         &manifest,
@@ -232,7 +231,7 @@ fn local_device_agent_checks_keys_and_tokens_and_shuts_down() {
     );
     assert!(wrong_server.stdout.is_empty());
 
-    // Rejections must not stop the agent from serving its approved client.
+    // bad requests must not stop good ones
     assert!(success(run(&client, &args)).contains("Running copies: 1\n"));
 
     let scale = [
@@ -316,7 +315,6 @@ fn local_device_agent_checks_keys_and_tokens_and_shuts_down() {
     }
 }
 
-/// Drives the real terminal UI. Opt-in because it requires the expect executable.
 #[test]
 #[ignore = "Requires expect and a working pseudoterminal"]
 fn device_dashboard_and_watch_use_the_right_key_for_each_agent() {
@@ -394,7 +392,7 @@ proc quit_dashboard {} {
 }
 if {[catch {
     spawn -noecho $env(FLEET_BIN) dashboard-device --manifest $env(FLEET_MANIFEST)
-    # Ratatui writes only changed cells, with cursor movements between words.
+    # the ui sends changed cells, not full lines
     see "nnected: 1/1"
     see "nnected: 3/3"
     send -- "+"

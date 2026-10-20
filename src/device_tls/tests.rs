@@ -30,7 +30,6 @@ fn configured(client: ClientConfig, server: ServerConfig) -> (Connection, Connec
     )
 }
 
-/// Offers raw-key support but sends no identity when the server requests one.
 #[derive(Debug)]
 struct MissingClientKey;
 
@@ -57,7 +56,7 @@ fn connections(expected: &DeviceIdentity, bundle: Arc<CertifiedKey>) -> (Connect
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth();
-    // Keep server-only tests separate from the mutual-authentication tests above.
+    // check server keys on their own
     let server = ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .expect("TLS 1.3 server")
@@ -72,7 +71,6 @@ fn connections(expected: &DeviceIdentity, bundle: Arc<CertifiedKey>) -> (Connect
     )
 }
 
-/// Exchanges actual TLS records in memory, without sockets or saved credentials.
 fn transfer(sender: &mut Connection, receiver: &mut Connection) -> Result<bool, rustls::Error> {
     let mut bytes = Vec::new();
     while sender.wants_write() {

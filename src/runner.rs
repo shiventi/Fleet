@@ -1,33 +1,22 @@
-//! Launches local processes and checks whether they are still running.
-
 use crate::workload::WorkloadSpec;
 use std::process::Child;
 use std::process::Command;
 
-/// Stores handles to processes launched by Fleet.
-///
-/// Finished handles are removed when `running_count` checks the list.
 pub struct ProcessRunner {
-    /// Handles used to inspect the launched processes.
     children: Vec<Child>,
 }
 
 impl ProcessRunner {
-    /// Creates an empty runner without starting any processes.
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
         }
     }
 
-    /// Starts one copy of the workload and stores its process handle.
-    /// The child does not inherit Fleet's control token.
-    ///
-    /// # Errors
-    /// Returns an error if the program cannot be launched.
     pub fn start(&mut self, workload: &WorkloadSpec) -> std::io::Result<()> {
         let child = Command::new(&workload.program)
             .args(&workload.args)
+            // do not pass the control token to apps
             .env_remove("FLEET_TOKEN")
             .spawn()?;
 
@@ -38,12 +27,6 @@ impl ProcessRunner {
         Ok(())
     }
 
-    /// Checks processes without waiting and removes handles for exited processes.
-    ///
-    /// Returns the number of handles whose processes were observed still running.
-    ///
-    /// # Panics
-    /// Panics if a process status check fails.
     pub fn running_count(&mut self) -> usize {
         self.children.retain_mut(|child| {
             let status = child.try_wait().expect("failed to check process");
@@ -57,6 +40,7 @@ impl ProcessRunner {
     }
 
     pub fn stop_all(&mut self) {
+        //todo: stop child trees
         for child in &mut self.children {
             let status = child.try_wait().expect("failed to check process");
 
@@ -72,11 +56,6 @@ impl ProcessRunner {
         self.children.clear();
     }
 
-    /// Force-stops one tracked process and collects its exit status.
-    /// Does nothing when no handles remain.
-    ///
-    /// # Panics
-    /// Panics if stopping or waiting for the process fails.
     pub fn stop_one(&mut self) {
         if let Some(mut child) = self.children.pop() {
             child.kill().expect("failed to stop process");

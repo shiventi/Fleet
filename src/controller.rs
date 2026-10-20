@@ -1,61 +1,34 @@
-//! Checks the status of agents listed in a cluster file.
-
 use crate::client;
 use crate::tls::TlsFiles;
 use serde::Deserialize;
 use std::io;
 
-/// One agent to check.
 #[derive(Debug, Deserialize)]
 pub struct NodeSpec {
-    /// A label shown in the watcher output.
     pub name: String,
-    /// The agent's numeric IP address and port.
     pub address: String,
-    /// The name expected in the agent's certificate.
     pub server_name: String,
 
-    /// Saved device name used by device-key connections; optional in certificate mode.
     #[serde(default)]
     pub peer: Option<String>,
 }
 
-/// The agents listed in a cluster file.
 #[derive(Debug, Deserialize)]
 pub struct ClusterSpec {
-    /// Agents checked during each round.
     pub nodes: Vec<NodeSpec>,
 }
 
-/// Checks agents in batches of up to four and pauses two seconds after each round.
-///
-/// Failed checks are printed without ending the loop. Each batch runs its checks
-/// together and finishes before the next batch starts. Ctrl+C ends this watcher,
-/// not the agents or their workloads.
-/// One client shares the loaded token and TLS config across all checks.
-/// Restart the watcher to load changed credentials. Each check opens a new connection.
-/// This function does not start, stop, or move workloads.
-///
-/// # Errors
-/// Returns an error if the cluster is invalid, the token is missing or blank,
-/// or the local TLS files cannot be loaded.
 pub fn watch(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     let client = client::FleetClient::new(files)?;
     let clients = vec![client; cluster.nodes.len()];
     watch_clients(cluster, &clients)
 }
 
-/// Watches each node using its named, approved device key and the shared token.
-/// Restart the watcher to reload keys or approvals. Leaves agents running.
-///
-/// # Errors
-/// Returns an error if the cluster, peer names, saved keys, or token are invalid.
 pub fn watch_device(cluster: &ClusterSpec) -> io::Result<()> {
     let clients = cluster.device_clients()?;
     watch_clients(cluster, &clients)
 }
 
-/// Checks matching nodes and clients in batches of up to four.
 fn watch_clients(cluster: &ClusterSpec, clients: &[client::FleetClient]) -> io::Result<()> {
     cluster.validate().map_err(io::Error::other)?;
     if cluster.nodes.len() != clients.len() {
@@ -63,6 +36,7 @@ fn watch_clients(cluster: &ClusterSpec, clients: &[client::FleetClient]) -> io::
     }
 
     loop {
+        // check up to four nodes at once
         for (nodes, clients) in cluster.nodes.chunks(4).zip(clients.chunks(4)) {
             std::thread::scope(|scope| {
                 for (node, client) in nodes.iter().zip(clients.iter()) {
@@ -74,7 +48,6 @@ fn watch_clients(cluster: &ClusterSpec, clients: &[client::FleetClient]) -> io::
     }
 }
 
-/// Checks one agent and prints its counts or an error.
 pub fn check_node(node: &NodeSpec, client: &client::FleetClient) {
     match client.fetch_status(&node.address, &node.server_name) {
         Ok(status) => println!(
@@ -86,13 +59,6 @@ pub fn check_node(node: &NodeSpec, client: &client::FleetClient) {
 }
 
 impl ClusterSpec {
-    /// Checks that the cluster has nodes with names and usable IP addresses and ports.
-    ///
-    /// This does not contact agents or check their certificates.
-    ///
-    /// # Errors
-    /// Returns a message if the cluster is empty, a name is blank, or an address
-    /// is invalid, has port zero, or uses a wildcard IP.
     pub fn validate(&self) -> Result<(), String> {
         if self.nodes.is_empty() {
             return Err("Cluster has to have at least one node.".to_string());
@@ -118,10 +84,6 @@ impl ClusterSpec {
         Ok(())
     }
 
-    /// Loads one client per node, in manifest order, using each node's approved peer.
-    ///
-    /// # Errors
-    /// Returns an error if validation, peer lookup, key loading, or token loading fails.
     pub fn device_clients(&self) -> io::Result<Vec<client::FleetClient>> {
         self.validate().map_err(io::Error::other)?;
         let mut clients = Vec::new();

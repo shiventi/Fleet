@@ -1,5 +1,3 @@
-//! Manages workload copies and handles commands over mutual TLS.
-
 use crate::device_tls;
 use crate::identity::DeviceIdentity;
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
@@ -16,49 +14,82 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 
-/// Runs an agent using trusted client certificates and a shared token.
-///
-/// # Errors
-/// Returns an error if TLS setup or agent startup fails.
-///
-/// # Panics
-/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
+//keep app state seperate.
+struct ManagedWorkload {
+    spec: WorkloadSpec,
+    runner: ProcessRunner,
+    retry_at: Instant,
+}
+
+impl ManagedWorkload {
+    fn new(spec: WorkloadSpec) -> Self {
+        Self { spec, runner: ProcessRunner::new(), retry_at: Instant::now() }
+    }
+
+    fn tick(&mut self, keep_alive: &AtomicBool) {
+        let count = self.runner.running_count();
+        let observed = ObservedWorkload {
+            name: self.spec.name.clone(),
+            running: u32::try_from(count).expect("process count exceeds u32"),
+        };
+        let actions = plan(&self.spec, &observed);
+
+        for action in actions {
+            if !keep_alive.load(Ordering::SeqCst) {
+                break;
+            }
+
+            match action {
+                Action::Start { workload_name } => {
+                    if Instant::now() < self.retry_at {
+                        break;
+                    }
+
+                    println!("Starting workload: {}", workload_name);
+                    if let Err(error) = self.runner.start(&self.spec) {
+                        eprintln!("Failed to start {}: {}", workload_name, error);
+                        self.retry_at = Instant::now() + Duration::from_secs(5);
+                        break;
+                    }
+                }
+                Action::Stop { workload_name } => {
+                    println!("Stopping one copy of {}", workload_name);
+                    self.runner.stop_one();
+                }
+            }
+        }
+    }
+
+    fn status(&mut self) -> StatusResponse {
+        StatusResponse{workload_name: Some(self.spec.name.clone()), desired: self.spec.replicas, running: self.runner.running_count()}
+    }
+
+    fn stop(&mut self) -> StatusResponse {
+        self.spec.replicas = 0;
+        self.runner.stop_all();
+        self.status()
+    }
+
+    fn scale(&mut self, replicas: u32) -> Result<StatusResponse, String> {
+        if replicas > MAX_REPLICAS {
+            return Err(format!("Replica count cannot exceed {}", MAX_REPLICAS));
+        }
+        self.spec.replicas = replicas;
+        Ok(self.status())
+    }
+}
+
 pub fn allow_connection(address: &str, desired: WorkloadSpec, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
     let config = Arc::new(tls::server_config(files)?);
     serve(address, desired, config, allow_remote)
 }
 
-/// Runs an agent using approved client device keys and a shared token.
-/// Approvals are copied at startup; restart the agent after changing them.
-///
-/// # Errors
-/// Returns an error if device-key setup or agent startup fails.
-///
-/// # Panics
-/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
 pub fn allow_device_connection(address: &str, desired: WorkloadSpec, identity: &DeviceIdentity, store: &TrustStore, allow_remote: bool) -> io::Result<()> {
     let config = Arc::new(device_tls::server_config(identity, store)?);
     serve(address, desired, config, allow_remote)
 }
 
-/// Adds or removes copies and handles commands using the supplied TLS config.
-///
-/// Ctrl+C ends the loop and stops direct child processes.
-/// Failed launches are logged and retried after at least five seconds.
-/// The agent keeps handling commands during this delay.
-/// Client I/O can delay checks for up to five seconds per connection.
-/// Reads `FLEET_TOKEN` once at startup and checks it before handling any command.
-/// Requires an authenticated TLS client. Remote addresses need `allow_remote`.
-/// Wildcard addresses such as `0.0.0.0` and `::` are rejected.
-///
-/// # Errors
-/// Returns an error if `FLEET_TOKEN` is missing, blank, or not valid text,
-/// or the listener or Ctrl+C handler cannot be set up.
-/// Later connection errors are logged and the loop continues.
-///
-/// # Panics
-/// Panics if a process cannot be checked or stopped, or its count exceeds u32.
-fn serve(address: &str, mut desired: WorkloadSpec, config: Arc<ServerConfig>, allow_remote: bool) -> io::Result<()> {
+fn serve(address: &str, desired: WorkloadSpec, config: Arc<ServerConfig>, allow_remote: bool) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
 
@@ -78,7 +109,6 @@ fn serve(address: &str, mut desired: WorkloadSpec, config: Arc<ServerConfig>, al
         return Err(io::Error::other("Remote addresses require --allow-remote"));
     }
 
-    let mut runner = ProcessRunner::new();
     let listener = TcpListener::bind(listen_address)?;
     listener.set_nonblocking(true)?;
     let keep_alive = Arc::new(AtomicBool::new(true));
@@ -88,43 +118,17 @@ fn serve(address: &str, mut desired: WorkloadSpec, config: Arc<ServerConfig>, al
     println!("Listening on: {}", address);
     println!("Agent workload: {:?}", desired);
 
-    let mut retry_at = Instant::now();
+    //todo: run several apps
+    let mut workload = ManagedWorkload::new(desired);
 
     while keep_alive.load(Ordering::SeqCst) {
-        let count = runner.running_count();
-        let observed = ObservedWorkload {
-            name: desired.name.clone(),
-            running: u32::try_from(count).expect("process count exceeds u32"),
-        };
-        let actions = plan(&desired, &observed);
-        for action in actions {
-            if !keep_alive.load(Ordering::SeqCst) {
-                break;
-            }
-            match action {
-                Action::Start { workload_name } => {
-                    if Instant::now() < retry_at {
-                        break;
-                    }
-                    println!("Starting workload: {}", workload_name);
-                    if let Err(error) = runner.start(&desired) {
-                        eprintln!("Failed to start {}: {}", workload_name, error);
-                        retry_at = Instant::now() + Duration::from_secs(5);
-                        break;
-                    }
-                }
-                Action::Stop { workload_name } => {
-                    println!("Stopping one copy of {}", workload_name);
-                    runner.stop_one();
-                }
-            }
-        }
+        workload.tick(&keep_alive);
         match listener.accept() {
             Ok((stream, peer_address)) => {
                 println!("Connected: {}", peer_address);
                 let result = tls::accept(stream, Arc::clone(&config)).and_then(|mut stream| {
                     let result =
-                        handle_client(&mut stream, &mut desired, &mut runner, &expected_token);
+                        handle_client(&mut stream, &mut workload, &expected_token);
                     stream.conn.send_close_notify();
                     let _ = stream.flush();
                     result
@@ -134,23 +138,22 @@ fn serve(address: &str, mut desired: WorkloadSpec, config: Arc<ServerConfig>, al
                 }
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // No client is waiting; this is normal in nonblocking mode.
+                // no client yet
             }
             Err(e) => {
                 eprintln!("connection failed: {}", e);
             }
         }
-        // Avoid checking continuously and wasting CPU.
+        // pause so we do not waste cpu
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    runner.stop_all();
+    workload.runner.stop_all();
     Ok(())
 }
 
-/// Sends one JSON reply followed by a newline.
-///
-/// # Errors
-/// Returns an error if encoding or writing fails.
+#[cfg(test)]
+mod tests;
+
 fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     let json = serde_json::to_string(reply)?;
     writer.write_all(json.as_bytes())?;
@@ -159,12 +162,7 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
-/// Checks the request's token before handling its command.
-///
-/// # Errors
-/// Returns an error if reading, writing, or encoding fails.
-/// Invalid requests or wrong tokens receive an error reply without changing the workload.
-fn handle_client(stream: &mut ServerStream, desired: &mut WorkloadSpec, runner: &mut ProcessRunner, expected_token: &str) -> io::Result<()> {
+fn handle_client(stream: &mut ServerStream, workload: &mut ManagedWorkload, expected_token: &str) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,
@@ -189,51 +187,15 @@ fn handle_client(stream: &mut ServerStream, desired: &mut WorkloadSpec, runner: 
         return send_reply(stream, &reply);
     }
 
-    match authenticated.request {
-        Request::Status => {
-            let response = StatusResponse {
-                workload_name: Some(desired.name.clone()),
-                desired: desired.replicas,
-                running: runner.running_count(),
-            };
-
-            let reply = Response::Status { status: response };
-            send_reply(stream, &reply)?;
-        }
-        Request::Stop => {
-            // Change the target first so the next loop does not restart the workload.
-            desired.replicas = 0;
-            runner.stop_all();
-
-            let response = StatusResponse {
-                workload_name: Some(desired.name.clone()),
-                desired: desired.replicas,
-                running: runner.running_count(),
-            };
-
-            let reply = Response::Status { status: response };
-            send_reply(stream, &reply)?;
-        }
-        Request::Scale { replicas } => {
-            // Reject the request before changing the agent's target.
-            if replicas > MAX_REPLICAS {
-                let reply = Response::Error {
-                    message: format!("Replica count cannot exceed {}", MAX_REPLICAS),
-                };
-                return send_reply(stream, &reply);
-            }
-            // The next supervisor loop brings the running count to this target.
-            desired.replicas = replicas;
-            let response = StatusResponse {
-                workload_name: Some(desired.name.clone()),
-                desired: desired.replicas,
-                running: runner.running_count(),
-            };
-
-            let reply = Response::Status { status: response };
-            send_reply(stream, &reply)?;
-        }
-    }
+    let reply = match authenticated.request {
+        Request::Status => Response::Status { status: workload.status() },
+        Request::Stop => Response::Status { status: workload.stop() },
+        Request::Scale { replicas } => match workload.scale(replicas) {
+            Ok(status) => Response::Status { status },
+            Err(message) => Response::Error { message },
+        },
+    };
+    send_reply(stream, &reply)?;
 
     Ok(())
 }

@@ -333,7 +333,7 @@ fn load_or_create_reports_a_missing_parent_directory() {
 
 #[test]
 fn default_directory_uses_home_without_creating_a_key() {
-    // Use a child process so changing HOME cannot affect other tests.
+    // keep home changes in this test
     if let Some(home) = std::env::var_os("FLEET_TEST_PRIVATE_HOME") {
         let directory = default_directory().expect("prepare default directory");
         assert_eq!(directory, Path::new(&home).join(".config/fleet/identity"));

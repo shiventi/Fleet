@@ -1,6 +1,3 @@
-//! Stores device identities, fingerprints public keys, and prepares Rustls signers.
-//! Network authentication does not use these identities yet.
-
 use p256::pkcs8::{DecodePublicKey, EncodePublicKey};
 use rcgen::KeyPair;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -19,25 +16,21 @@ use std::{
 #[cfg(unix)]
 const MAX_KEY_BYTES: u64 = 16 * 1024;
 
-/// Holds a device's signing keys. Never print or share the private key.
 pub struct DeviceIdentity {
     key_pair: KeyPair,
 }
 
 impl DeviceIdentity {
-    /// Generates an unsaved identity, returning any key-generation error.
     pub fn generate() -> io::Result<Self> {
         let key_pair = KeyPair::generate().map_err(io::Error::other)?;
 
         Ok(Self { key_pair })
     }
 
-    /// Returns only the public key as readable PEM text.
     pub fn public_key_pem(&self) -> String {
         self.key_pair.public_key_pem()
     }
 
-    /// Loads a private key, rejecting unsafe files, invalid keys, or read errors.
     #[cfg(unix)]
     pub fn load(path: &Path) -> io::Result<Self> {
         let pem = read_private(path, MAX_KEY_BYTES)?;
@@ -46,15 +39,12 @@ impl DeviceIdentity {
         Ok(Self { key_pair })
     }
 
-    /// Saves a complete key without overwriting. Requires a private parent directory.
-    /// Returns file, permission, or sync errors.
     #[cfg(unix)]
     pub fn save_new(&self, path: &Path) -> io::Result<()> {
         let pem = self.key_pair.serialize_pem();
         write_private(path, pem.as_bytes(), false)
     }
 
-    /// Reuses a saved key or creates a missing one. Other errors are returned unchanged.
     #[cfg(unix)]
     pub fn load_or_create(path: &Path) -> io::Result<Self> {
         match Self::load(path) {
@@ -63,6 +53,7 @@ impl DeviceIdentity {
                 let identity = Self::generate()?;
                 match identity.save_new(path) {
                     Ok(()) => Ok(identity),
+                    // reuse the key if another start wrote it
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Self::load(path),
                     Err(error) => Err(error),
                 }
@@ -71,9 +62,6 @@ impl DeviceIdentity {
         }
     }
 
-    /// Creates private storage in ~/.config/fleet/identity and reuses its key.
-    /// Stores device-key.pem and never prints the private key.
-    /// Returns storage errors; non-Unix platforms are not supported yet.
     pub fn load_default() -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -83,6 +71,7 @@ impl DeviceIdentity {
         }
         #[cfg(not(unix))]
         {
+            //todo: add windows key files
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "Automatic identity storage currently supports macOS and Linux only",
@@ -96,11 +85,6 @@ impl DeviceIdentity {
         Self::load_or_create(&directory.join("device-key.pem"))
     }
 
-    /// Loads this identity into Rustls's signer without changing the saved key.
-    /// Does not open a connection or approve any peer.
-    ///
-    /// # Errors
-    /// Returns an error if Rustls cannot load the private key.
     pub fn signing_key(&self) -> io::Result<Arc<dyn SigningKey>> {
         let der = self.key_pair.serialize_der();
         let key: PrivateKeyDer<'static> = PrivatePkcs8KeyDer::from(der).into();
@@ -112,12 +96,6 @@ impl DeviceIdentity {
             .map_err(io::Error::other)
     }
 }
-/// Returns SHA256: followed by 64 lowercase hexadecimal characters for a P-256 key.
-/// Hashes standard DER bytes so PEM whitespace and line endings do not matter.
-/// Compare the full value through a trusted channel; it does not prove ownership.
-///
-/// # Errors
-/// Returns an error for invalid PEM, private keys, or unsupported key types.
 pub(crate) fn fingerprint(public_key: &str) -> io::Result<String> {
     let key = p256::PublicKey::from_public_key_pem(public_key.trim()).map_err(io::Error::other)?;
     let der = key.to_public_key_der().map_err(io::Error::other)?;
@@ -127,8 +105,6 @@ pub(crate) fn fingerprint(public_key: &str) -> io::Result<String> {
     Ok(format!("SHA256:{:x}", hash))
 }
 
-/// Finds and prepares private storage without creating a device key.
-/// Returns storage errors; non-Unix platforms are not supported yet.
 pub(crate) fn default_directory() -> io::Result<std::path::PathBuf> {
     #[cfg(unix)]
     {
@@ -145,7 +121,6 @@ pub(crate) fn default_directory() -> io::Result<std::path::PathBuf> {
     }
 }
 
-/// Creates or checks private storage without creating a device key.
 #[cfg(unix)]
 fn prepare_directory(home: &Path) -> io::Result<std::path::PathBuf> {
     if !home.is_absolute() {
@@ -170,7 +145,6 @@ fn parent_directory(path: &Path) -> &Path {
         .unwrap_or(Path::new("."))
 }
 
-/// Rejects symlinks and directories that another user could change.
 #[cfg(unix)]
 fn check_directory(path: &Path, private: bool) -> io::Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
@@ -198,8 +172,6 @@ fn check_directory(path: &Path, private: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Writes a complete, owner-only file in a private directory.
-/// Existing files must be safe text files no larger than 1 MiB to be replaced.
 #[cfg(unix)]
 pub(crate) fn write_private(path: &Path, contents: &[u8], replace: bool) -> io::Result<()> {
     let parent = parent_directory(path);
@@ -224,7 +196,6 @@ pub(crate) fn write_private(path: &Path, contents: &[u8], replace: bool) -> io::
     Ok(())
 }
 
-/// Reads bounded text from a regular, owner-only file in a private directory.
 #[cfg(unix)]
 pub(crate) fn read_private(path: &Path, max_bytes: u64) -> io::Result<String> {
     check_directory(parent_directory(path), true)?;
@@ -259,8 +230,6 @@ pub(crate) fn read_private(path: &Path, max_bytes: u64) -> io::Result<String> {
     Ok(pem)
 }
 
-/// Locks a separate private file until the returned handle is dropped.
-/// Keep the lock file in place so all callers lock the same file.
 #[cfg(unix)]
 pub(crate) fn lock_private(path: &Path) -> io::Result<std::fs::File> {
     check_directory(parent_directory(path), true)?;
@@ -286,7 +255,6 @@ pub(crate) fn lock_private(path: &Path) -> io::Result<std::fs::File> {
     Ok(file)
 }
 
-/// New directories are private; existing unsafe directories are rejected, not modified.
 #[cfg(unix)]
 fn ensure_directory(path: &Path, private: bool) -> io::Result<()> {
     match std::fs::DirBuilder::new().mode(0o700).create(path) {
