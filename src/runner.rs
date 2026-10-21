@@ -1,4 +1,7 @@
 use crate::workload::WorkloadSpec;
+use rustix::io::Errno;
+use rustix::process::{Pid, Signal, kill_process_group};
+use std::os::unix::process::CommandExt;
 use std::process::Child;
 use std::process::Command;
 
@@ -16,6 +19,7 @@ impl ProcessRunner {
     pub fn start(&mut self, workload: &WorkloadSpec) -> std::io::Result<()> {
         let child = Command::new(&workload.program)
             .args(&workload.args)
+            .process_group(0)
             // do not pass the control token to apps
             .env_remove("FLEET_TOKEN")
             .spawn()?;
@@ -33,32 +37,46 @@ impl ProcessRunner {
 
             match status {
                 None => true,
-                Some(_) => false,
+                Some(status) => {
+                    println!("Process {} exited: {}", child.id(), status);
+                    let group = Pid::from_child(child);
+                    match kill_process_group(group, Signal::KILL) {
+                        Ok(()) => {}
+                        Err(Errno::SRCH) => {}
+                        Err(err) => {
+                            panic!("failed to stop process: {}", err);
+                        }
+                    }
+                    false
+                }
             }
         });
         self.children.len()
     }
 
     pub fn stop_all(&mut self) {
-        //todo: stop child trees
-        for child in &mut self.children {
-            let status = child.try_wait().expect("failed to check process");
-
-            match status {
-                None => {
-                    let _ = child.kill().expect("failed to stop process");
-                }
-                Some(_) => {}
-            }
-
-            let _ = child.wait().expect("failed to wait for process");
+        while !self.children.is_empty() {
+            self.stop_one();
         }
-        self.children.clear();
     }
 
     pub fn stop_one(&mut self) {
         if let Some(mut child) = self.children.pop() {
-            child.kill().expect("failed to stop process");
+            let group = Pid::from_child(&child);
+            let mut result = kill_process_group(group, Signal::KILL);
+
+            if result == Err(Errno::PERM) {
+                let _ = child.try_wait().expect("failed to check process");
+                result = kill_process_group(group, Signal::KILL);
+            }
+
+            match result {
+                Ok(()) => {}
+                Err(Errno::SRCH) => {}
+                Err(err) => {
+                    panic!("failed to stop process group: {}", err);
+                }
+            }
             child.wait().expect("failed to wait for process");
         }
     }
