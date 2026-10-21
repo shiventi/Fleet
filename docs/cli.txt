@@ -35,7 +35,7 @@ Print the public key's SHA-256 fingerprint instead of its PEM text.
 
 ## Commands::Agent
 
-Run a workload and accept commands over mutual TLS.
+Run one or more apps using certificates. Remote commands require one app for now.
 
 ## Commands::Agent::allow_remote
 
@@ -91,7 +91,7 @@ List, inspect, add, or remove approved device keys.
 
 ## Commands::AgentDevice
 
-Run an agent using approved device keys instead of certificate files.
+Run one or more apps using approved device keys. Remote commands require one app for now.
 
 ## Commands::StatusDevice
 

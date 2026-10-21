@@ -1,5 +1,5 @@
 App settings read from JSON files and the checks they must pass.
-The multi-app manifest is preparation; live agents still manage one app.
+Agents accept one app or a list of apps and manage each app's processes separately.
 
 ## MAX_REPLICAS
 
@@ -37,7 +37,7 @@ Returns a message if the name or executable is blank, or the count is too high.
 
 ## AgentManifest
 
-A nonempty list of apps with unique names. Not used by live agent commands yet.
+A nonempty list of apps with unique names, used by both agent modes.
 
 ## AgentManifest::workloads
 

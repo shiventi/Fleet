@@ -4,7 +4,7 @@ use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
 use crate::tls::{self, ServerStream, TlsFiles};
 use crate::trust::TrustStore;
-use crate::workload::{MAX_REPLICAS, WorkloadSpec};
+use crate::workload::{AgentManifest, MAX_REPLICAS, WorkloadSpec};
 use crate::{Action, ObservedWorkload, plan};
 use rustls::ServerConfig;
 use std::io::{self, Write};
@@ -79,19 +79,21 @@ impl ManagedWorkload {
     }
 }
 
-pub fn allow_connection(address: &str, desired: WorkloadSpec, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
+pub fn allow_connection(address: &str, desired: AgentManifest, files: &TlsFiles, allow_remote: bool) -> io::Result<()> {
     let config = Arc::new(tls::server_config(files)?);
     serve(address, desired, config, allow_remote)
 }
 
-pub fn allow_device_connection(address: &str, desired: WorkloadSpec, identity: &DeviceIdentity, store: &TrustStore, allow_remote: bool) -> io::Result<()> {
+pub fn allow_device_connection(address: &str, desired: AgentManifest, identity: &DeviceIdentity, store: &TrustStore, allow_remote: bool) -> io::Result<()> {
     let config = Arc::new(device_tls::server_config(identity, store)?);
     serve(address, desired, config, allow_remote)
 }
 
-fn serve(address: &str, desired: WorkloadSpec, config: Arc<ServerConfig>, allow_remote: bool) -> io::Result<()> {
+fn serve(address: &str, desired: AgentManifest, config: Arc<ServerConfig>, allow_remote: bool) -> io::Result<()> {
     let expected_token = std::env::var("FLEET_TOKEN")
         .map_err(|_| io::Error::other("Your FLEET_TOKEN is not set"))?;
+
+    desired.validate().map_err(io::Error::other)?;
 
     if expected_token.trim().is_empty() {
         return Err(io::Error::other("Your FLEET_TOKEN is blank"));
@@ -118,17 +120,22 @@ fn serve(address: &str, desired: WorkloadSpec, config: Arc<ServerConfig>, allow_
     println!("Listening on: {}", address);
     println!("Agent workload: {:?}", desired);
 
-    //todo: run several apps
-    let mut workload = ManagedWorkload::new(desired);
+    let mut workloads: Vec<ManagedWorkload> = Vec::new();
+
+    for spec in desired.workloads {
+        workloads.push(ManagedWorkload::new(spec));
+    }
 
     while keep_alive.load(Ordering::SeqCst) {
-        workload.tick(&keep_alive);
+        for workload in &mut workloads {
+            workload.tick(&keep_alive);
+        }
         match listener.accept() {
             Ok((stream, peer_address)) => {
                 println!("Connected: {}", peer_address);
                 let result = tls::accept(stream, Arc::clone(&config)).and_then(|mut stream| {
                     let result =
-                        handle_client(&mut stream, &mut workload, &expected_token);
+                        handle_client(&mut stream, &mut workloads, &expected_token);
                     stream.conn.send_close_notify();
                     let _ = stream.flush();
                     result
@@ -147,7 +154,9 @@ fn serve(address: &str, desired: WorkloadSpec, config: Arc<ServerConfig>, allow_
         // pause so we do not waste cpu
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    workload.runner.stop_all();
+    for workload in &mut workloads {
+        workload.runner.stop_all();
+    }
     Ok(())
 }
 
@@ -162,7 +171,7 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_client(stream: &mut ServerStream, workload: &mut ManagedWorkload, expected_token: &str) -> io::Result<()> {
+fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], expected_token: &str) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,
@@ -174,18 +183,21 @@ fn handle_client(stream: &mut ServerStream, workload: &mut ManagedWorkload, expe
         }
     };
 
-    if authenticated
-        .token
-        .as_bytes()
-        .ct_eq(expected_token.as_bytes())
-        .unwrap_u8()
-        == 0
-    {
+    if authenticated.token.as_bytes().ct_eq(expected_token.as_bytes()).unwrap_u8() == 0 {
         let reply = Response::Error {
             message: String::from("Authentication failed"),
         };
         return send_reply(stream, &reply);
     }
+
+    if workloads.len() != 1 {
+        let reply = Response::Error {
+            message: String::from("Choose an app before sending commands"),
+        };
+        return send_reply(stream, &reply);
+    }
+
+    let workload = &mut workloads[0];
 
     let reply = match authenticated.request {
         Request::Status => Response::Status { status: workload.status() },

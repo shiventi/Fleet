@@ -126,6 +126,28 @@ impl Agent {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    fn wait_for_apps(&mut self, expected: &[(&str, usize)], timeout: Duration) -> Vec<(String, Pid)> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let log = fs::read_to_string(&self.log).unwrap();
+            assert!(self.child.try_wait().unwrap().is_none(), "agent exited: {log}");
+            let mut name = String::new();
+            let mut launches = Vec::new();
+            for line in log.lines() {
+                if let Some(app) = line.strip_prefix("Starting workload: ") {
+                    name = app.to_string();
+                } else if let Some(pid) = line.strip_prefix("Started process: ") {
+                    launches.push((name.clone(), Pid::from_raw(pid.parse().unwrap()).unwrap()));
+                }
+            }
+            if expected.iter().all(|(name, count)| launches.iter().filter(|(app, _)| app.as_str() == *name).count() >= *count) {
+                return launches;
+            }
+            assert!(Instant::now() < deadline, "apps did not start or restart: {log}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
 }
 
 impl Drop for Agent {
@@ -312,6 +334,53 @@ fn local_device_agent_checks_keys_and_tokens_and_shuts_down() {
     }
     for (path, before) in files {
         assert_eq!(fs::read(path).unwrap(), before);
+    }
+}
+
+#[test]
+fn two_app_example_restarts_each_app_and_rejects_unnamed_commands() {
+    let root = tempfile::tempdir().unwrap();
+    let (server, server_public) = device(root.path(), "server");
+    let (client, client_public) = device(root.path(), "client");
+    approve(&server, "client", &client_public);
+    approve(&client, "server", &server_public);
+    let manifest = root.path().join("apps.json");
+    fs::write(&manifest, include_str!("../examples/apps.json")).unwrap();
+    let (mut agent, address) = Agent::start(&server, &manifest, root.path().join("agent.log"));
+    let initial = agent.wait_for_apps(&[("demo-fast", 1), ("demo-slow", 2)], Duration::from_secs(5));
+    assert_eq!(initial.len(), 3);
+
+    for args in [
+        vec!["status-device", "--address", &address, "--peer", "server"],
+        vec!["stop-device", "--address", &address, "--peer", "server"],
+        vec!["scale-device", "--address", &address, "--peer", "server", "--replicas", "0"],
+    ] {
+        let output = run(&client, &args);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Choose an app before sending commands"));
+    }
+    let bad_token = command(&client).env("FLEET_TOKEN", "wrong-test-token")
+        .args(["stop-device", "--address", &address, "--peer", "server"]).output().unwrap();
+    assert!(!bad_token.status.success());
+    assert!(String::from_utf8_lossy(&bad_token.stderr).contains("Authentication failed"));
+
+    // the fast app must not restart the slow app
+    agent.wait_for_apps(&[("demo-fast", 2), ("demo-slow", 2)], Duration::from_secs(15));
+    for (name, pid) in &initial {
+        if name == "demo-slow" {
+            assert!(test_kill_process(*pid).is_ok(), "slow app restarted too soon");
+        } else {
+            assert_eq!(test_kill_process(*pid), Err(rustix::io::Errno::SRCH));
+        }
+    }
+
+    agent.wait_for_apps(&[("demo-fast", 2), ("demo-slow", 4)], Duration::from_secs(35));
+    assert!(agent.stop().success());
+    for line in fs::read_to_string(&agent.log).unwrap().lines() {
+        if let Some(pid) = line.strip_prefix("Started process: ") {
+            let pid = Pid::from_raw(pid.parse().unwrap()).unwrap();
+            assert_eq!(test_kill_process(pid), Err(rustix::io::Errno::SRCH), "child must be reaped");
+        }
     }
 }
 

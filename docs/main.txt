@@ -38,15 +38,15 @@ Failed launches are logged and retried after at least five seconds.
 
 ## load_manifest
 
-Reads and validates a JSON manifest without starting any processes.
+Reads and validates a single-app JSON file for `run` and `validate`.
 
 ### Errors
 Returns an error if the file cannot be read, deserialized, or validated.
 
 ## load_agent_manifest
 
-Reads and validates a multi-app manifest without starting any processes.
-Live commands still use the single-app loader until multi-app wiring is ready.
+Reads and validates single-app or multi-app files for both agent modes.
+Wraps old single-app files in a one-entry list without starting any processes.
 
 ### Errors
 Returns a filename and reason if reading, parsing, or validation fails.

@@ -1,0 +1,16 @@
+{
+  "workloads": [
+    {
+      "name": "demo-fast",
+      "program": "/bin/sleep",
+      "args": ["10"],
+      "replicas": 1
+    },
+    {
+      "name": "demo-slow",
+      "program": "/bin/sleep",
+      "args": ["30"],
+      "replicas": 2
+    }
+  ]
+}

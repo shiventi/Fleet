@@ -1,7 +1,8 @@
 Fleet is a Rust tool for running and checking apps across your computers.
 
-**Work in progress.** Each agent manages one app, with up to 32 copies.
-Failover, moving files, and running several apps under one agent are not ready yet.
+**Work in progress.** Agents can run several apps, with up to 32 copies each.
+Remote commands and views currently require a single-app agent.
+Failover and moving files are not ready yet.
 
 ## Start Here
 
@@ -49,8 +50,8 @@ The main file ties these parts together:
 - [`supervise`](crate::supervise) runs the local check loop.
 - [`load_manifest`](crate::load_manifest) and [`load_cluster`](crate::load_cluster)
   read and check JSON files.
-- [`load_agent_manifest`](crate::load_agent_manifest) is preparation for multiple
-  apps; live commands do not use it yet.
+- [`load_agent_manifest`](crate::load_agent_manifest) reads single-app or multi-app
+  files for both agent modes.
 
 ## Access Rules
 

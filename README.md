@@ -2,11 +2,11 @@
 
 **Work in progress. Not ready for production.**
 
-Fleet is a Rust CLI to run and check apps across computers. Each agent manages
-one app with up to 32 copies, restarts missing copies, and accepts remote stop
-and scale commands.
+Fleet is a Rust CLI to run and check apps across computers. Each agent runs
+one or more apps with up to 32 copies each and restarts missing copies.
+Remote commands and views currently work only with single-app agents.
 
-Failover, file transfer, and running several apps under one agent are not ready yet.
+Failover and file transfer are not ready yet.
 
 ## Try It
 
@@ -18,6 +18,8 @@ cargo run -- validate examples/demo.json
 ```
 
 The demo starts `sleep` again every ten seconds. Ctrl+C stops its direct children.
+Both agent modes also accept [examples/apps.json](examples/apps.json) after setup.
+`run` and `validate` still take single-app files.
 
 ## Remote Apps
 

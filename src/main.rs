@@ -133,11 +133,19 @@ fn load_manifest(path: &std::path::Path) -> Result<WorkloadSpec, String> {
     Ok(desired)
 }
 
-//todo: wire this loader
 fn load_agent_manifest(path: &std::path::Path) -> Result<AgentManifest, String> {
     let contents = std::fs::read_to_string(path).map_err(|err| format!("Failed to read file '{}': {}", path.display(), err))?;
-    let desired: AgentManifest = serde_json::from_str(&contents).map_err(|e| format!("Failed to parse JSON in '{}': {}", path.display(), e))?;
+    let value: serde_json::Value = serde_json::from_str(&contents).map_err(|err| format!("Failed to parse JSON in '{}': {}", path.display(), err))?;
 
+    let desired: AgentManifest = if value.get("workloads").is_some() {
+        serde_json::from_value(value).map_err(|err| format!("Failed to parse JSON in '{}': {}", path.display(), err))?
+    } else {
+        let spec: WorkloadSpec = serde_json::from_value(value).map_err(|err| format!("Failed to parse JSON in '{}': {}", path.display(), err))?;
+
+        AgentManifest {
+            workloads: vec![spec],
+        }
+    };
     desired.validate().map_err(|err| format!("Invalid agent manifest '{}': {}", path.display(), err))?;
 
     Ok(desired)
@@ -187,7 +195,7 @@ fn main() {
             tls,
             allow_remote,
         } => {
-            let desired = match load_manifest(&manifest) {
+            let desired = match load_agent_manifest(&manifest) {
                 Ok(workload) => workload,
                 Err(error) => {
                     eprintln!("Error: {}", error);
@@ -315,7 +323,7 @@ fn main() {
         }
 
         Commands::AgentDevice { listen, manifest, allow_remote } => {
-            let desired = match load_manifest(&manifest) {
+            let desired = match load_agent_manifest(&manifest) {
                 Ok(workload) => workload,
                 Err(error) => {
                     eprintln!("Manifest error: {}", error);

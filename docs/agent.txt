@@ -1,4 +1,5 @@
 Manages workload copies and handles commands over mutual TLS.
+Both agent modes accept single-app or multi-app files.
 
 ## ManagedWorkload
 
@@ -56,8 +57,10 @@ Panics if a process cannot be checked or stopped, or its count exceeds u32.
 ## serve
 
 Adds or removes copies and handles commands using the supplied TLS config.
+Validates every app before starting any, then keeps a separate runner and retry
+time for each app.
 
-Ctrl+C ends the loop and stops direct child processes.
+Ctrl+C ends the loop and stops direct child processes from every app.
 Failed launches are logged and retried after at least five seconds.
 The agent keeps handling commands during this delay.
 Client I/O can delay checks for up to five seconds per connection.
@@ -83,6 +86,8 @@ Returns an error if encoding or writing fails.
 ## handle_client
 
 Checks the request's token before handling its command.
+Rejects unnamed commands when the agent has several apps. Named commands are not
+built yet; single-app agents keep their existing status, stop, and scale behavior.
 
 ### Errors
 Returns an error if reading, writing, or encoding fails.

@@ -49,6 +49,10 @@ Agent terminal:
 cargo run -- agent-device --listen 127.0.0.1:7070 --manifest examples/demo.json
 ```
 
+Use `examples/apps.json` to run two apps. Remote commands below currently require
+a single-app agent; app selection is not built yet. `run` and `validate` still
+take single-app files.
+
 Client terminal:
 
 ```sh
@@ -95,7 +99,8 @@ renewal and revocation are not built yet.
 
 ## Limits
 
-- One app per agent, 0-32 copies. Stop keeps the agent alive; scale above zero
+- Several apps per agent, 0-32 copies each. Remote commands and views require one
+  app for now. Stop keeps the agent alive; scale above zero
   starts copies again. Targets reset to the JSON file when the agent restarts.
 - Approved clients with the token have full control. Restart agents and clients
   after key or token changes; existing connections are not revoked.
