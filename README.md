@@ -17,7 +17,7 @@ cargo run -- run examples/demo.json
 cargo run -- validate examples/demo.json
 ```
 
-The demo starts `sleep` again every ten seconds. Ctrl+C stops its direct children.
+The demo starts `sleep` again every ten seconds. Ctrl+C stops its process groups.
 Both agent modes also accept [examples/apps.json](examples/apps.json) after setup.
 `run` and `validate` still take single-app files.
 
@@ -37,14 +37,16 @@ Edit the cluster file with your agents' addresses and approved peer names first.
 Up/Down selects a node; `=` or `+` adds a copy; `-` removes one.
 `q`, Esc, or Ctrl+C closes the view without stopping agents.
 `watch-device` prints counts instead. Use `cargo run -- --help` for all commands.
+The dashboard shows the selected host's CPU and RAM, not per-app usage.
+Use `cargo run -- metrics` for local CPU and RAM readings.
 
 ## Limits
 
 Remote commands need mutual TLS and a shared token. Approved clients have full
 app control. Keep secrets out of Git and use a private network with a firewall.
 
-Scale changes stay in memory. Apps are not sandboxed, and cleanup stops direct
-children only. Process counts are not health checks; an unreachable agent does
+Scale changes stay in memory. Apps are not sandboxed; processes that leave their
+app's process group can escape cleanup. Counts are not health checks; an unreachable agent does
 not prove its app stopped. See [usage notes](docs/usage.md#limits) for details.
 
 ## Docs and Tests

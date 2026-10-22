@@ -142,7 +142,10 @@ pub enum Commands {
         peer: String,
         #[arg(long)]
         replicas: u32,
-    }
+    },
+
+    #[command(about = "show live cpu and ram usage")]
+    Metrics,
 
 }
 

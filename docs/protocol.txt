@@ -19,6 +19,15 @@ The requested number of running copies.
 
 The number of copies observed running.
 
+## StatusResponse::metrics
+
+Optional host CPU and RAM readings. Replies without this field still work.
+
+## HostMetrics
+
+cpu_percent is whole-host CPU usage, or None while warming up.
+used_mem and total_mem are bytes, not per-app memory.
+
 ## Request
 
 A client command carried inside an authenticated request.
@@ -26,6 +35,11 @@ A client command carried inside an authenticated request.
 ## Request::Status
 
 Ask for the current workload and counts.
+
+## Request::StatusApp
+
+Ask for one app by workload_name. The agent supports this request;
+CLI app selection is not wired yet. Unknown names return an error.
 
 ## Request::Stop
 

@@ -68,6 +68,8 @@ with a firewall; wildcard IPs are rejected.
 For watch or dashboard, edit `examples/cluster-device.json`: set each address
 and approved `peer`, keeping `server_name` as `localhost`.
 Run `watch-device` or `dashboard-device` with `--manifest` pointing to that file.
+The dashboard's CPU/RAM meters show the selected host, not individual apps.
+For this computer's readings only, run `cargo run -- metrics`.
 
 ## Certificates Instead
 
@@ -105,7 +107,7 @@ renewal and revocation are not built yet.
 - Approved clients with the token have full control. Restart agents and clients
   after key or token changes; existing connections are not revoked.
 - Keep secrets out of Git. Apps do not inherit the token, but are not sandboxed.
-  Cleanup stops direct children, not their full process trees.
+  Cleanup stops app process groups; descendants that leave the group can escape it.
 - Counts are not health checks. A failed connection does not prove an app stopped.
 - Failed launches retry after five seconds; apps that start then exit do not wait.
   Each connection has a five-second deadline and 16 KiB message limit.

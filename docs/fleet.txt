@@ -13,7 +13,7 @@ cargo run -- run examples/demo.json
 ```
 
 Fleet starts the requested copies and restarts them when they exit.
-Ctrl+C stops the direct child processes.
+Ctrl+C stops the app process groups.
 
 For setup, device approval, and remote commands, see the
 [README](https://github.com/shiventi/Fleet#readme).
@@ -39,6 +39,7 @@ Pick a module to read its notes and browse its types and functions.
 | Running apps | [agent](crate::agent), [runner](crate::runner) | Process checks, restarts, stop, and scale |
 | Remote control | [client](crate::client), [protocol](crate::protocol) | Requests, replies, and shared message types |
 | Multiple computers | [controller](crate::controller), [dashboard](crate::dashboard) | Cluster files, polling, and the terminal view |
+| Host usage | [metrics](crate::metrics) | CPU and RAM sampling |
 | Device access | [identity](crate::identity), [trust](crate::trust) | Saved keys and approved peers |
 | Secure connections | [device TLS](crate::device_tls), [certificate TLS](crate::tls) | Key checks, encryption, and connection limits |
 

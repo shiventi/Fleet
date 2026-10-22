@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
+use crate::metrics::Sampler;
 
 //keep app state seperate.
 struct ManagedWorkload {
@@ -61,7 +62,7 @@ impl ManagedWorkload {
     }
 
     fn status(&mut self) -> StatusResponse {
-        StatusResponse{workload_name: Some(self.spec.name.clone()), desired: self.spec.replicas, running: self.runner.running_count()}
+        StatusResponse{workload_name: Some(self.spec.name.clone()), desired: self.spec.replicas, running: self.runner.running_count(), metrics: None}
     }
 
     fn stop(&mut self) -> StatusResponse {
@@ -126,6 +127,8 @@ fn serve(address: &str, desired: AgentManifest, config: Arc<ServerConfig>, allow
         workloads.push(ManagedWorkload::new(spec));
     }
 
+    let mut sampler = Sampler::new();
+
     while keep_alive.load(Ordering::SeqCst) {
         for workload in &mut workloads {
             workload.tick(&keep_alive);
@@ -135,7 +138,7 @@ fn serve(address: &str, desired: AgentManifest, config: Arc<ServerConfig>, allow
                 println!("Connected: {}", peer_address);
                 let result = tls::accept(stream, Arc::clone(&config)).and_then(|mut stream| {
                     let result =
-                        handle_client(&mut stream, &mut workloads, &expected_token);
+                        handle_client(&mut stream, &mut workloads, &expected_token, &mut sampler);
                     stream.conn.send_close_notify();
                     let _ = stream.flush();
                     result
@@ -171,7 +174,7 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], expected_token: &str) -> io::Result<()> {
+fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], expected_token: &str, sampler: &mut Sampler) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
         Ok(request) => request,
@@ -189,24 +192,42 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
         };
         return send_reply(stream, &reply);
     }
+    let requested_name = match &authenticated.request {
+        Request::StatusApp { workload_name } => Some(workload_name.as_str()),
+        _ => None,
+    };
 
-    if workloads.len() != 1 {
-        let reply = Response::Error {
-            message: String::from("Choose an app before sending commands"),
-        };
-        return send_reply(stream, &reply);
-    }
+    let workload = if let Some(name) = requested_name {
+        match workloads.iter_mut().find(|app| app.spec.name == name) {
+            Some(app) => app,
+            None => {
+                let reply = Response::Error {
+                    message: format!("Unknown app: {}", name),
+                };
+                return send_reply(stream, &reply);
+            }
+        }
+    } else {
+        if workloads.len() != 1 {
+            let reply = Response::Error {
+                message: String::from("Choose an app before sending commands"),
+            };
+            return send_reply(stream, &reply);
+        }
+        &mut workloads[0]
+    };
 
-    let workload = &mut workloads[0];
-
-    let reply = match authenticated.request {
-        Request::Status => Response::Status { status: workload.status() },
+    let mut reply = match authenticated.request {
+        Request::Status | Request::StatusApp { .. } => Response::Status { status: workload.status() },
         Request::Stop => Response::Status { status: workload.stop() },
         Request::Scale { replicas } => match workload.scale(replicas) {
             Ok(status) => Response::Status { status },
             Err(message) => Response::Error { message },
         },
     };
+    if let Response::Status { status } = &mut reply {
+        status.metrics = Some(sampler.sample());
+    }
     send_reply(stream, &reply)?;
 
     Ok(())

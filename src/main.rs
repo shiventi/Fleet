@@ -25,6 +25,9 @@ mod trust;
 #[doc = include_str!("../docs/device_tls.txt")]
 mod device_tls;
 
+#[doc = include_str!("../docs/metrics.txt")]
+mod metrics;
+
 use clap::Parser;
 use cli::{Cli, Commands};
 use controller::ClusterSpec;
@@ -414,6 +417,9 @@ fn main() {
                 }
             }
         }
+
+        Commands::Metrics => metrics::run(),
+
     }
 }
 

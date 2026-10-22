@@ -18,6 +18,7 @@ Creates an empty runner without starting any processes.
 
 Starts one copy of the workload and stores its process handle.
 The child does not inherit Fleet's control token.
+Each copy starts in its own process group.
 
 ### Errors
 Returns an error if the program cannot be launched.
@@ -25,6 +26,7 @@ Returns an error if the program cannot be launched.
 ## ProcessRunner::running_count
 
 Checks processes without waiting and removes handles for exited processes.
+Also stops remaining members of an exited process's group.
 
 Returns the number of handles whose processes were observed still running.
 
@@ -33,7 +35,8 @@ Panics if a process status check fails.
 
 ## ProcessRunner::stop_one
 
-Force-stops one tracked process and collects its exit status.
+Force-stops one app process group and collects the direct child's exit status.
+Descendants that leave the group are not tracked.
 Does nothing when no handles remain.
 
 ### Panics

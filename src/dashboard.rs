@@ -5,9 +5,10 @@ use crate::tls::TlsFiles;
 use crate::workload::MAX_REPLICAS;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout};
-use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Borders, Padding, Paragraph, Row, Table, TableState, Wrap};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -254,11 +255,27 @@ fn scale_command(index: usize, key: KeyCode, states: &[NodeState]) -> Result<Sca
     Ok(ScaleCommand { index, replicas })
 }
 
+fn draw_meter(frame: &mut Frame, area: Rect, label: &str, reading: String, ratio: f64, color: Color) {
+    let parts = Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).spacing(1).split(area);
+    let bars = [Bar::default().value((ratio * 1000.0).round() as u64).text_value(String::new())];
+    let chart = BarChart::default()
+        .data(BarGroup::default().bars(&bars))
+        .max(1000)
+        .bar_width(2)
+        .style(Style::default().bg(Color::Rgb(38, 42, 47)))
+        .bar_style(Style::default().fg(color).bg(Color::Rgb(38, 42, 47)));
+    frame.render_widget(chart, parts[0]);
+    let lines = vec![Line::from(label).style(Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)), Line::from(reading)];
+    frame.render_widget(Paragraph::new(lines), parts[1]);
+}
+
 fn draw(frame: &mut Frame, cluster: &ClusterSpec, states: &[NodeState], selection: &mut TableState, notice: &str) {
+    let compact = frame.area().width.saturating_sub(2) < 60;
     let areas = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
         Constraint::Length(2),
+        Constraint::Length(if compact { 4 } else { 3 }),
     ])
     .margin(1)
     .split(frame.area());
@@ -270,7 +287,57 @@ fn draw(frame: &mut Frame, cluster: &ClusterSpec, states: &[NodeState], selectio
     frame.render_widget(title, heading[0]);
     frame.render_widget(count, heading[1]);
 
-    let compact = areas[1].width < 60;
+    let index = selection.selected().unwrap_or(0);
+    let metrics = match states.get(index) {
+        Some(NodeState::Connected { status }) => status.metrics.as_ref(),
+        _ => None,
+    };
+
+    let node_name = cluster.nodes.get(index).map(|node| node.name.as_str()).unwrap_or("No node selected");
+    let footer = if compact {
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(areas[3])
+    } else {
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(42)]).spacing(3).split(areas[3])
+    };
+    let mut host = vec![Line::from(vec![
+        Span::styled("Host: ", Style::default().fg(Color::Gray)),
+        Span::styled(node_name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    ])];
+    if !compact {
+        if let Some(node) = cluster.nodes.get(index) {
+            host.push(Line::from(node.address.as_str()).style(Style::default().fg(Color::DarkGray)));
+        }
+    }
+    frame.render_widget(Paragraph::new(host), footer[0]);
+    let inner = footer[1];
+    let panels = Layout::horizontal([Constraint::Length(14), Constraint::Min(0)]).spacing(2).split(inner);
+
+    if let Some(metrics) = metrics {
+        let (ratio, label) = match metrics.cpu_percent {
+            Some(cpu) if cpu.is_finite() => (
+                (f64::from(cpu) / 100.0).clamp(0.0, 1.0),
+                format!("{:.1}%", cpu),
+            ),
+            _ => (0.0, String::from("Warming up")),
+        };
+
+        draw_meter(frame, panels[0], "CPU:", label, ratio, ACCENT);
+
+        let (ratio, label) = if metrics.total_mem > 0 {
+            let used_gib = metrics.used_mem as f64 / 1_073_741_824.0;
+            let total_gib = metrics.total_mem as f64 / 1_073_741_824.0;
+            (
+                (metrics.used_mem as f64 / metrics.total_mem as f64).clamp(0.0, 1.0),
+                format!("{:.1} / {:.1} GiB", used_gib, total_gib),
+            )
+        } else {
+            (0.0, String::from("Unavailable"))
+        };
+        draw_meter(frame, panels[1], "RAM:", label, ratio, Color::Cyan);
+    } else {
+        frame.render_widget(Paragraph::new("Metrics unavailable").style(Style::default().fg(Color::Gray)), inner);
+    }
+
     let rows = cluster.nodes.iter().enumerate().map(|(index, node)| {
         let connection = match &states[index] {
             NodeState::NotChecked => String::from("Not checked"),
@@ -338,6 +405,7 @@ mod tests {
                 workload_name: Some(String::from("demo-service")),
                 desired,
                 running,
+                metrics: None,
             },
         }
     }
@@ -492,6 +560,100 @@ mod tests {
     }
 
     #[test]
+    fn draws_metrics_for_the_selected_node() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster.json")).unwrap();
+        let mut states = vec![connected(1, 1), connected(2, 2)];
+        if let NodeState::Connected { status } = &mut states[1] {
+            status.metrics = Some(crate::protocol::HostMetrics {
+                cpu_percent: Some(25.0),
+                used_mem: 2 * 1_073_741_824,
+                total_mem: 8 * 1_073_741_824,
+            });
+        }
+        for width in [80, 40, 160] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 18)).unwrap();
+            let mut selection = TableState::default();
+            for (index, expected) in [(1, "2.0 / 8.0 GiB"), (0, "Metrics unavailable")] {
+                selection.select(Some(index));
+                terminal.draw(|frame| draw(frame, &cluster, &states, &mut selection, "")).unwrap();
+                let screen: String = terminal.backend().buffer().content.iter().map(|cell| cell.symbol()).collect();
+                assert!(screen.contains(expected));
+                if index == 1 {
+                    assert!(screen.contains("25.0%"));
+                    assert!(screen.contains("CPU:"));
+                    assert!(screen.contains("RAM:"));
+                    assert!(!screen.contains('|'));
+                    for label in ["CPU:", "RAM:"] {
+                        let buffer = terminal.backend().buffer();
+                        let position = buffer.content.windows(label.len()).position(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>() == label).unwrap();
+                        assert!(buffer.content[position..position + label.len()].iter().all(|cell| cell.modifier.contains(Modifier::BOLD)));
+                        assert!(position % usize::from(width) >= usize::from(width.saturating_sub(43)));
+                        assert_eq!(position / usize::from(width), 14);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn meters_fill_up_from_the_bottom() {
+        for (ratio, filled_rows) in [(0.0, 0), (0.25, 1), (0.75, 3), (1.0, 4)] {
+            let mut terminal = Terminal::new(TestBackend::new(30, 4)).unwrap();
+            terminal.draw(|frame| draw_meter(frame, frame.area(), "CPU:", String::from("test reading"), ratio, ACCENT)).unwrap();
+            let buffer = terminal.backend().buffer();
+            for y in 0..4 {
+                assert_eq!(buffer[(0, y)].symbol() != " ", y >= 4 - filled_rows);
+            }
+            let label: String = (3..7).map(|x| buffer[(x, 0)].symbol()).collect();
+            assert_eq!(label, "CPU:");
+        }
+    }
+
+    #[test]
+    fn keeps_the_table_full_height_with_metrics_below() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster.json")).unwrap();
+        let states = vec![NodeState::NotChecked, NodeState::NotChecked];
+        for (width, height) in [(40, 18), (80, 18), (160, 40)] {
+            let mut selection = TableState::default();
+            selection.select(Some(0));
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &cluster, &states, &mut selection, "")).unwrap();
+            let buffer = terminal.backend().buffer();
+            let metrics_height = if width < 62 { 4 } else { 3 };
+            let metrics_y = height - metrics_height - if width < 62 { 0 } else { 1 };
+            let row: String = (0..width).map(|x| buffer[(x, metrics_y)].symbol()).collect();
+            assert!(row.contains("Metrics unavailable"));
+            assert_ne!(buffer[(1, height - metrics_height - 4)].symbol(), " ");
+            let row: String = (0..width).map(|x| buffer[(x, height - metrics_height - 1)].symbol()).collect();
+            assert!(row.starts_with(" Host: local-one"));
+            let row: String = (0..width).map(|x| buffer[(x, 8)].symbol()).collect();
+            assert!(row.contains("local-two"));
+        }
+    }
+
+    #[test]
+    fn handles_missing_and_full_memory_readings() {
+        let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster.json")).unwrap();
+        let mut selection = TableState::default();
+        selection.select(Some(0));
+        let mut terminal = Terminal::new(TestBackend::new(80, 18)).unwrap();
+        for total_mem in [0, 1_073_741_824] {
+            let mut states = vec![connected(1, 1), connected(1, 1)];
+            if let NodeState::Connected { status } = &mut states[0] {
+                status.metrics = Some(crate::protocol::HostMetrics {
+                    cpu_percent: None,
+                    used_mem: 2 * 1_073_741_824,
+                    total_mem,
+                });
+            }
+            terminal.draw(|frame| draw(frame, &cluster, &states, &mut selection, "")).unwrap();
+            let screen: String = terminal.backend().buffer().content.iter().map(|cell| cell.symbol()).collect();
+            assert!(screen.contains("Warming up"));
+            assert!(screen.contains(if total_mem == 0 { "Unavailable" } else { "2.0 / 1.0 GiB" }));
+        }
+    }
+
+    #[test]
     fn draws_nodes_in_normal_and_compact_terminals() {
         let cluster: ClusterSpec = serde_json::from_str(include_str!("../examples/cluster.json"))
             .expect("example cluster should parse");
@@ -501,7 +663,7 @@ mod tests {
         selection.select(Some(0));
 
         for width in [80, 40] {
-            let mut terminal = Terminal::new(TestBackend::new(width, 15))
+            let mut terminal = Terminal::new(TestBackend::new(width, 18))
                 .expect("test terminal should initialize");
             terminal
                 .draw(|frame| draw(frame, &cluster, &states, &mut selection, ""))
@@ -534,6 +696,7 @@ mod tests {
                     workload_name: Some(String::from("demo-service")),
                     desired: 2,
                     running: 1,
+                    metrics: None,
                 },
             },
             NodeState::Unreachable {
@@ -544,7 +707,7 @@ mod tests {
         for width in [80, 40] {
             let mut selection = TableState::default();
             selection.select(Some(0));
-            let mut terminal = Terminal::new(TestBackend::new(width, 15))
+            let mut terminal = Terminal::new(TestBackend::new(width, 18))
                 .expect("test terminal should initialize");
             terminal
                 .draw(|frame| {

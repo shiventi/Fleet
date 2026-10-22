@@ -151,3 +151,96 @@ fn shutdown_flag_prevents_start_and_stop_actions() {
     app.0.tick(&keep_alive);
     assert_eq!(app.0.runner.running_count(), 1);
 }
+
+fn reply_for(workloads: &mut [ManagedWorkload], token: &str, request: Request) -> Response {
+    let server = DeviceIdentity::generate().unwrap();
+    let client = DeviceIdentity::generate().unwrap();
+    let mut store = TrustStore::new();
+    store.add(crate::trust::TrustedPeer {
+        name: "client".into(), public_key: client.public_key_pem(),
+    }).unwrap();
+    let server_config = Arc::new(device_tls::server_config(&server, &store).unwrap());
+    let peer = crate::trust::TrustedPeer {
+        name: "server".into(), public_key: server.public_key_pem(),
+    };
+    let client_config = Arc::new(device_tls::client_config(&client, &peer).unwrap());
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+
+    std::thread::scope(|scope| {
+        let client = scope.spawn(move || {
+            let mut stream = tls::connect(&address, "localhost", client_config).unwrap();
+            let request = AuthenticatedRequest { token: token.into(), request };
+            serde_json::to_writer(&mut stream, &request).unwrap();
+            stream.write_all(b"\n").unwrap();
+            stream.flush().unwrap();
+            serde_json::from_str(&tls::read_message(&mut stream).unwrap()).unwrap()
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let socket = loop {
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "test client did not connect");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("test listener failed: {error}"),
+            }
+        };
+        let mut stream = tls::accept(socket, server_config).unwrap();
+        handle_client(&mut stream, workloads, "test-token", &mut Sampler::new()).unwrap();
+        client.join().unwrap()
+    })
+}
+
+#[test]
+fn named_status_selects_the_app_and_keeps_old_commands_safe() {
+    let manifest: AgentManifest = serde_json::from_str(include_str!("../../examples/apps.json")).unwrap();
+    let mut workloads = Vec::new();
+    for spec in manifest.workloads {
+        workloads.push(ManagedWorkload::new(spec));
+    }
+
+    for (name, desired) in [("demo-fast", 1), ("demo-slow", 2)] {
+        let request = Request::StatusApp { workload_name: name.into() };
+        match reply_for(&mut workloads, "test-token", request) {
+            Response::Status { status } => {
+                assert_eq!(status.workload_name.as_deref(), Some(name));
+                assert_eq!(status.desired, desired);
+                assert_eq!(status.running, 0);
+                let metrics = status.metrics.expect("agent replies should include host readings");
+                assert!(metrics.total_mem > 0);
+                assert!(metrics.used_mem <= metrics.total_mem);
+            }
+            reply => panic!("expected named status: {reply:?}"),
+        }
+    }
+
+    for (token, request, expected) in [
+        ("test-token", Request::StatusApp { workload_name: "missing".into() }, "Unknown app: missing"),
+        ("test-token", Request::StatusApp { workload_name: "".into() }, "Unknown app: "),
+        ("wrong-token", Request::StatusApp { workload_name: "missing".into() }, "Authentication failed"),
+        ("test-token", Request::Status, "Choose an app before sending commands"),
+        ("test-token", Request::Stop, "Choose an app before sending commands"),
+        ("test-token", Request::Scale { replicas: 0 }, "Choose an app before sending commands"),
+    ] {
+        match reply_for(&mut workloads, token, request) {
+            Response::Error { message } => assert_eq!(message, expected),
+            reply => panic!("expected an error: {reply:?}"),
+        }
+    }
+    assert_eq!(workloads[0].spec.replicas, 1);
+    assert_eq!(workloads[1].spec.replicas, 2);
+
+    workloads.truncate(1);
+    match reply_for(&mut workloads, "test-token", Request::Status) {
+        Response::Status { status } => assert_eq!(status.workload_name.as_deref(), Some("demo-fast")),
+        reply => panic!("expected old single-app status: {reply:?}"),
+    }
+    let request = Request::StatusApp { workload_name: "demo-slow".into() };
+    match reply_for(&mut workloads, "test-token", request) {
+        Response::Error { message } => assert_eq!(message, "Unknown app: demo-slow"),
+        reply => panic!("must not fall back to the first app: {reply:?}"),
+    }
+}

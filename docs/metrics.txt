@@ -1,0 +1,19 @@
+Samples whole-host CPU and RAM with sysinfo.
+
+## run
+
+Prints local readings once per second until interrupted.
+
+## Sampler
+
+Keeps one system snapshot between reads. Each agent owns one sampler.
+
+## Sampler::new
+
+Loads RAM and starts the CPU baseline without waiting.
+
+## Sampler::sample
+
+Returns cached readings; refreshes after at least one second.
+CPU is None until the first refresh. Memory values are bytes.
+Does not sleep, print, or collect process details.

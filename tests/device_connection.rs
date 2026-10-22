@@ -474,8 +474,8 @@ if {[catch {
     quit_dashboard
 
     spawn -noecho $env(FLEET_BIN) dashboard-device --manifest $env(FLEET_BAD_MANIFEST)
-    see "Unreachable:"
-    see "Unreachable:"
+    see "Unreachable"
+    see "Unreachable"
     quit_dashboard
     counts $env(FLEET_FIRST) local-one 2
     counts $env(FLEET_SECOND) local-two 2

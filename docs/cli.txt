@@ -85,6 +85,10 @@ Trusted CA and client identity used to check the agents.
 
 Show and scale agents using their saved device keys.
 
+## Commands::Metrics
+
+Print this computer's CPU and RAM once per second. Ctrl+C exits.
+
 ## Commands::Peers
 
 List, inspect, add, or remove approved device keys.

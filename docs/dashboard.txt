@@ -6,6 +6,10 @@ Shows configured nodes while collecting their status in the background.
 Up/Down selects a node; = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
 Only one scale command can be pending. Command results appear below the table.
 Scaling changes the agent's in-memory target, not its manifest file.
+The footer shows the selected host on the left and vertical CPU/RAM meters
+on the right. Small terminals put the host above the meters.
+Readings cover the whole host, not individual apps. CPU needs a first sample;
+missing readings are shown as unavailable, not measured zero usage.
 q, Esc, or Ctrl+C closes the screen and restores the terminal.
 Rows show the latest reply or connection error, not application health.
 Checks run one at a time, with a two-second pause after each round.
@@ -58,6 +62,10 @@ Builds a scale request from the selected node's latest target, not its running c
 
 Draws each node's latest state, hiding addresses on narrow terminals.
 Long messages are clipped to the available column width.
+
+## draw_meter
+
+Draws a vertical bar with its label and exact reading beside it.
 
 ### Panics
 Panics if there is no state entry for a configured node.
