@@ -386,6 +386,84 @@ fn two_app_example_restarts_each_app_and_rejects_unnamed_commands() {
 
 #[test]
 #[ignore = "Requires expect and a working pseudoterminal"]
+fn device_dashboard_scales_the_selected_app_only() {
+    let root = tempfile::tempdir().unwrap();
+    let (server, server_public) = device(root.path(), "server");
+    let (controller, controller_public) = device(root.path(), "controller");
+    approve(&server, "controller", &controller_public);
+    approve(&controller, "local-one", &server_public);
+    let manifest = root.path().join("apps.json");
+    fs::write(&manifest, serde_json::to_vec(&serde_json::json!({ "workloads": [
+        { "name": "demo-fast", "program": "/bin/sleep", "args": ["60"], "replicas": 1 },
+        { "name": "demo-slow", "program": "/bin/sleep", "args": ["60"], "replicas": 2 }
+    ] })).unwrap()).unwrap();
+    let log = root.path().join("agent.log");
+    let (mut agent, address) = Agent::start(&server, &manifest, log.clone());
+    let cluster = root.path().join("cluster.json");
+    fs::write(&cluster, serde_json::to_vec(&serde_json::json!({ "nodes": [
+        { "name": "local-one", "address": address, "server_name": "localhost", "peer": "local-one" }
+    ] })).unwrap()).unwrap();
+    let output = Command::new("expect")
+        .env("HOME", &controller).env("FLEET_TOKEN", TOKEN).env("TERM", "xterm-256color")
+        .env("FLEET_BIN", env!("CARGO_BIN_EXE_fleet"))
+        .env("FLEET_MANIFEST", &cluster).env("FLEET_AGENT_LOG", &log)
+        .args(["-c", r#"
+set timeout 15
+set stty_init "rows 24 columns 110"
+log_user 0
+proc wait_log {text count} {
+    global env spawn_id
+    for {set attempt 0} {$attempt < 50} {incr attempt} {
+        expect -timeout 0 {
+            -re {.+} {exp_continue}
+            timeout {}
+            eof {error "Dashboard exited early"}
+        }
+        set file [open $env(FLEET_AGENT_LOG) r]
+        set log [read $file]
+        close $file
+        if {[regexp -all -- $text $log] >= $count} {return}
+        after 100
+    }
+    error "Agent did not log: $text"
+}
+if {[catch {
+    spawn -noecho $env(FLEET_BIN) dashboard-device --manifest $env(FLEET_MANIFEST)
+    expect {
+        -exact "demo-slow" {}
+        timeout {error "App table did not load"}
+        eof {error "Dashboard exited early"}
+    }
+    send -- "\t+\033\[B"
+    wait_log "Starting workload: demo-fast" 2
+    after 200
+    send -- "-"
+    wait_log "Stopping one copy of demo-slow" 1
+    send -- "q"
+    expect { eof {} timeout {error "Dashboard did not quit"} }
+    set result [wait]
+    if {[lindex $result 2] != 0 || [lindex $result 3] != 0} {error "Dashboard failed: $result"}
+} message]} {
+    puts stderr $message
+    catch {close}
+    catch {wait}
+    exit 1
+}
+"#]).output().expect("run expect");
+    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    let launches = agent.wait_for_apps(&[("demo-fast", 2), ("demo-slow", 2)], Duration::from_secs(5));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let live = |name: &str| launches.iter().filter(|(app, pid)| app == name && test_kill_process(*pid).is_ok()).count();
+        if live("demo-fast") == 2 && live("demo-slow") == 1 { break; }
+        assert!(Instant::now() < deadline, "wrong app counts after dashboard scaling");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(agent.stop().success());
+}
+
+#[test]
+#[ignore = "Requires expect and a working pseudoterminal"]
 fn device_dashboard_and_watch_use_the_right_key_for_each_agent() {
     let root = tempfile::tempdir().unwrap();
     let (first, first_public) = device(root.path(), "first");
@@ -439,9 +517,16 @@ proc see {text} {
         eof {error "Process exited before showing: $text"}
     }
 }
-proc counts {address peer count} {
-    global env
+proc counts {address peer count {drain 1}} {
+    global env spawn_id
     for {set attempt 0} {$attempt < 40} {incr attempt} {
+        if {$drain} {
+            expect -timeout 0 {
+                -re {.+} {exp_continue}
+                timeout {}
+                eof {error "Dashboard exited early"}
+            }
+        }
         set status [exec $env(FLEET_BIN) status-device --address $address --peer $peer]
         if {[string first "Desired copies: $count\n" $status] >= 0 &&
             [string first "Running copies: $count" $status] >= 0} {return}
@@ -461,14 +546,12 @@ proc quit_dashboard {} {
 }
 if {[catch {
     spawn -noecho $env(FLEET_BIN) dashboard-device --manifest $env(FLEET_MANIFEST)
-    # the ui sends changed cells, not full lines
-    see "nnected: 1/1"
-    see "nnected: 3/3"
-    send -- "+"
+    see "dashboard-test"
+    send -- "\t+"
     counts $env(FLEET_FIRST) local-one 2
     counts $env(FLEET_SECOND) local-two 3
     after 250
-    send -- "\033\[B-"
+    send -- "\t\033\[B\t-"
     counts $env(FLEET_SECOND) local-two 2
     counts $env(FLEET_FIRST) local-one 2
     quit_dashboard
@@ -477,8 +560,8 @@ if {[catch {
     see "Unreachable"
     see "Unreachable"
     quit_dashboard
-    counts $env(FLEET_FIRST) local-one 2
-    counts $env(FLEET_SECOND) local-two 2
+    counts $env(FLEET_FIRST) local-one 2 0
+    counts $env(FLEET_SECOND) local-two 2 0
 
     spawn -noecho $env(FLEET_BIN) watch-device --manifest $env(FLEET_MANIFEST)
     set seen_one 0
@@ -497,8 +580,8 @@ if {[catch {
         timeout {error "Watch did not quit"}
     }
     wait
-    counts $env(FLEET_FIRST) local-one 2
-    counts $env(FLEET_SECOND) local-two 2
+    counts $env(FLEET_FIRST) local-one 2 0
+    counts $env(FLEET_SECOND) local-two 2 0
 } message]} {
     puts stderr $message
     catch {close}

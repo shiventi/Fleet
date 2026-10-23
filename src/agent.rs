@@ -174,6 +174,16 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
+fn list_apps(workloads: &mut [ManagedWorkload], sampler: &mut Sampler) -> Response {
+    let mut apps = Vec::new();
+    for workload in workloads {
+        let mut status = workload.status();
+        status.metrics = Some(sampler.sample());
+        apps.push(status);
+    }
+    Response::Apps { apps }
+}
+
 fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], expected_token: &str, sampler: &mut Sampler) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
@@ -192,8 +202,16 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
         };
         return send_reply(stream, &reply);
     }
+
+    if matches!(&authenticated.request, Request::ListApps) {
+        let reply = list_apps(workloads, sampler);
+        return send_reply(stream, &reply);
+    }
+
     let requested_name = match &authenticated.request {
-        Request::StatusApp { workload_name } => Some(workload_name.as_str()),
+        Request::StatusApp { workload_name }
+        | Request::StopApp { workload_name }
+        | Request::ScaleApp { workload_name, .. } => Some(workload_name.as_str()),
         _ => None,
     };
 
@@ -218,9 +236,10 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
     };
 
     let mut reply = match authenticated.request {
+        Request::ListApps => unreachable!("list requests are handled above"),
         Request::Status | Request::StatusApp { .. } => Response::Status { status: workload.status() },
-        Request::Stop => Response::Status { status: workload.stop() },
-        Request::Scale { replicas } => match workload.scale(replicas) {
+        Request::Stop | Request::StopApp { .. } => Response::Status { status: workload.stop() },
+        Request::Scale { replicas } | Request::ScaleApp { replicas, .. } => match workload.scale(replicas) {
             Ok(status) => Response::Status { status },
             Err(message) => Response::Error { message },
         },

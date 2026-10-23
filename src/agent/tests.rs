@@ -244,3 +244,65 @@ fn named_status_selects_the_app_and_keeps_old_commands_safe() {
         reply => panic!("must not fall back to the first app: {reply:?}"),
     }
 }
+
+#[test]
+fn named_controls_only_change_the_selected_app() {
+    let manifest: AgentManifest = serde_json::from_str(include_str!("../../examples/apps.json")).unwrap();
+    let mut workloads: Vec<_> = manifest.workloads.into_iter().map(ManagedWorkload::new).collect();
+    let request = Request::ScaleApp { workload_name: "demo-fast".into(), replicas: 3 };
+    match reply_for(&mut workloads, "test-token", request) {
+        Response::Status { status } => {
+            assert_eq!(status.workload_name.as_deref(), Some("demo-fast"));
+            assert_eq!(status.desired, 3);
+        }
+        reply => panic!("expected scale status: {reply:?}"),
+    }
+    assert_eq!(workloads[1].spec.replicas, 2);
+
+    let request = Request::StopApp { workload_name: "demo-slow".into() };
+    match reply_for(&mut workloads, "test-token", request) {
+        Response::Status { status } => {
+            assert_eq!(status.workload_name.as_deref(), Some("demo-slow"));
+            assert_eq!(status.desired, 0);
+            assert_eq!(status.running, 0);
+        }
+        reply => panic!("expected stop status: {reply:?}"),
+    }
+    assert_eq!(workloads[0].spec.replicas, 3);
+
+    for (token, request) in [
+        ("test-token", Request::StopApp { workload_name: "missing".into() }),
+        ("test-token", Request::ScaleApp { workload_name: "missing".into(), replicas: 0 }),
+        ("test-token", Request::ScaleApp { workload_name: "demo-fast".into(), replicas: MAX_REPLICAS + 1 }),
+        ("wrong-token", Request::StopApp { workload_name: "demo-fast".into() }),
+        ("wrong-token", Request::ScaleApp { workload_name: "demo-fast".into(), replicas: 0 }),
+    ] {
+        assert!(matches!(reply_for(&mut workloads, token, request), Response::Error { .. }));
+        assert_eq!(workloads[0].spec.replicas, 3);
+        assert_eq!(workloads[1].spec.replicas, 0);
+    }
+}
+
+#[test]
+fn listing_apps_requires_auth_and_keeps_their_targets() {
+    let manifest: AgentManifest = serde_json::from_str(include_str!("../../examples/apps.json")).unwrap();
+    let mut workloads: Vec<_> = manifest.workloads.into_iter().map(ManagedWorkload::new).collect();
+    match reply_for(&mut workloads, "wrong-token", Request::ListApps) {
+        Response::Error { message } => assert_eq!(message, "Authentication failed"),
+        reply => panic!("must authenticate before listing apps: {reply:?}"),
+    }
+    match reply_for(&mut workloads, "test-token", Request::ListApps) {
+        Response::Apps { apps } => {
+            assert_eq!(apps.len(), 2);
+            for (status, (name, desired)) in apps.iter().zip([("demo-fast", 1), ("demo-slow", 2)]) {
+                assert_eq!(status.workload_name.as_deref(), Some(name));
+                assert_eq!(status.desired, desired);
+                assert_eq!(status.running, 0);
+                assert!(status.metrics.is_some());
+            }
+        }
+        reply => panic!("expected an app list: {reply:?}"),
+    }
+    assert_eq!(workloads[0].spec.replicas, 1);
+    assert_eq!(workloads[1].spec.replicas, 2);
+}

@@ -35,7 +35,7 @@ Print the public key's SHA-256 fingerprint instead of its PEM text.
 
 ## Commands::Agent
 
-Run one or more apps using certificates. Remote commands require one app for now.
+Run one or more apps using certificates. The dashboard can select each app.
 
 ## Commands::Agent::allow_remote
 
@@ -71,7 +71,7 @@ Keep checking agents using their saved device keys.
 
 ## Commands::Dashboard
 
-Show live agent counts and scale the selected node with = or -.
+Show agents and apps; select an app and scale it with = or -.
 
 ## Commands::Dashboard::manifest
 
@@ -83,7 +83,7 @@ Trusted CA and client identity used to check the agents.
 
 ## Commands::DashboardDevice
 
-Show and scale agents using their saved device keys.
+Show agents and select apps using their saved device keys.
 
 ## Commands::Metrics
 
@@ -95,7 +95,7 @@ List, inspect, add, or remove approved device keys.
 
 ## Commands::AgentDevice
 
-Run one or more apps using approved device keys. Remote commands require one app for now.
+Run one or more apps using approved device keys. The dashboard can select each app.
 
 ## Commands::StatusDevice
 

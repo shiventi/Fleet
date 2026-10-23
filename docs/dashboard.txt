@@ -3,14 +3,17 @@ Shows live agent status and sends scale commands from a terminal table.
 ## run
 
 Shows configured nodes while collecting their status in the background.
-Up/Down selects a node; = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
+Tab switches between Agents and Apps; Up/Down selects a row in the focused table.
+In Apps, = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
+Only the named app is changed. Selection follows names if a poll reorders the list;
+missing apps clear selection rather than switching to another app.
 Only one scale command can be pending. Command results appear below the table.
 Scaling changes the agent's in-memory target, not its manifest file.
 The footer shows the selected host on the left and vertical CPU/RAM meters
 on the right. Small terminals put the host above the meters.
 Readings cover the whole host, not individual apps. CPU needs a first sample;
 missing readings are shown as unavailable, not measured zero usage.
-q, Esc, or Ctrl+C closes the screen and restores the terminal.
+Esc returns from Apps to Agents, then closes the view. q or Ctrl+C exits directly.
 Rows show the latest reply or connection error, not application health.
 Checks run one at a time, with a two-second pause after each round.
 Credentials are loaded once. Quitting waits for the current check or pause
@@ -56,19 +59,20 @@ Legacy terminals report Ctrl-minus as Ctrl+7 or Ctrl+_.
 
 ## scale_command
 
-Builds a scale request from the selected node's latest target, not its running count.
+Builds a named scale request from the selected app's latest target, not its running count.
 
 ## draw
 
-Draws each node's latest state, hiding addresses on narrow terminals.
+Draws Agents and Apps side by side on wide terminals, or the focused table
+on narrow terminals. The footer shows the selected host's metrics.
 Long messages are clipped to the available column width.
+
+### Panics
+Panics if there is no state entry for a configured node.
 
 ## draw_meter
 
 Draws a vertical bar with its label and exact reading beside it.
-
-### Panics
-Panics if there is no state entry for a configured node.
 
 ## NodeState
 
@@ -80,7 +84,7 @@ No check has finished for this node yet.
 
 ## NodeState::Connected
 
-The agent replied with its process counts.
+The agent replied with its app list and process counts.
 
 ## NodeState::Unreachable
 
@@ -88,7 +92,7 @@ The check failed, including connection, TLS, or authentication errors.
 
 ## ScaleCommand
 
-The selected node and its requested target count.
+The selected node, app name, and requested target count.
 
 ## ScaleResult
 
@@ -101,3 +105,19 @@ A timed check lets the screen discard replies made stale by a scale command.
 ## ShutdownFlag
 
 Stops workers even if setting up or drawing the terminal panics.
+
+## draw_apps
+
+Draws app names, running copies, targets, and the selected row.
+
+## node_apps
+
+Borrows a node's app list, or an empty slice when it is unavailable.
+
+## sync_app_selection
+
+Finds the selected app by name after updates; clears it if the app is missing.
+
+## apply_scale
+
+Checks the reply's app name and updates only that app in the stored list.

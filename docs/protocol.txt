@@ -45,6 +45,18 @@ CLI app selection is not wired yet. Unknown names return an error.
 
 Set the target to zero and stop all copies.
 
+## Request::StopApp
+
+Stop only the named app.
+
+## Request::ScaleApp
+
+Set the named app's copy count without changing other apps.
+
+## Request::ListApps
+
+Ask for every managed app's status. Requires the same authentication as commands.
+
 ## Request::Scale
 
 Change the target; the agent adjusts processes on its next loop.
@@ -60,6 +72,10 @@ The workload and current counts.
 ## Response::Error
 
 A readable error message.
+
+## Response::Apps
+
+The list returned by ListApps, with one StatusResponse per app.
 
 ## AuthenticatedRequest
 

@@ -30,6 +30,13 @@ Gets the agent's status without printing it.
 Returns an error if connecting, sending, reading, or parsing fails,
 or the agent rejects the request.
 
+## FleetClient::list_apps
+
+Gets every app's name, copy counts, and host metrics without printing.
+
+### Errors
+Returns an error if the request fails, is rejected, or gets the wrong reply type.
+
 ## FleetClient::stop
 
 Asks the agent to stop its workload and prints the updated counts.
@@ -48,6 +55,11 @@ The running count may take another agent loop to reach the target.
 ### Errors
 Returns an error if connecting, sending, reading, or parsing fails,
 or the agent rejects the request.
+
+## FleetClient::scale_app
+
+Sets one named app's target and returns its status. Other apps are unchanged.
+Returns an error if the request fails or gets an unexpected reply.
 
 ## FleetClient::from_config
 

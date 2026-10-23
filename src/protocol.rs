@@ -16,12 +16,16 @@ pub enum Request {
     Stop,
     Scale { replicas: u32 },
     StatusApp { workload_name: String },
+    StopApp { workload_name: String },
+    ScaleApp { workload_name: String, replicas: u32 },
+    ListApps,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Status { status: StatusResponse },
     Error { message: String },
+    Apps { apps: Vec<StatusResponse> },
 }
 
 // keep the token out of debug logs

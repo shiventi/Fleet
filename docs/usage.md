@@ -49,8 +49,8 @@ Agent terminal:
 cargo run -- agent-device --listen 127.0.0.1:7070 --manifest examples/demo.json
 ```
 
-Use `examples/apps.json` to run two apps. Remote commands below currently require
-a single-app agent; app selection is not built yet. `run` and `validate` still
+Use `examples/apps.json` to run two apps and select them in the dashboard.
+The commands below and watch still require a single-app agent. `run` and `validate` still
 take single-app files.
 
 Client terminal:
@@ -68,6 +68,9 @@ with a firewall; wildcard IPs are rejected.
 For watch or dashboard, edit `examples/cluster-device.json`: set each address
 and approved `peer`, keeping `server_name` as `localhost`.
 Run `watch-device` or `dashboard-device` with `--manifest` pointing to that file.
+In the dashboard, Tab switches Agents/Apps and arrows select rows. In Apps,
+use + or = to add a copy and - to remove one. Esc returns to Agents; q exits.
+Wide terminals show both tables; narrow terminals show the focused table.
 The dashboard's CPU/RAM meters show the selected host, not individual apps.
 For this computer's readings only, run `cargo run -- metrics`.
 
@@ -79,7 +82,8 @@ After loading the shared token, create 30-day test certificates:
 sh scripts/dev-certs.sh
 ```
 
-Set `TLS="$HOME/.config/fleet/dev-tls"` in both terminals. On the agent:
+Set `TLS="$HOME/.config/fleet/dev-tls"` in every terminal tab; shell variables
+are not shared between tabs. On the agent:
 
 ```sh
 cargo run -- agent --listen 127.0.0.1:7070 --manifest examples/demo.json \
@@ -101,8 +105,8 @@ renewal and revocation are not built yet.
 
 ## Limits
 
-- Several apps per agent, 0-32 copies each. Remote commands and views require one
-  app for now. Stop keeps the agent alive; scale above zero
+- Several apps per agent, 0-32 copies each. The dashboard controls named apps;
+  other remote commands and watch require one app. Stop keeps the agent alive; scale above zero
   starts copies again. Targets reset to the JSON file when the agent restarts.
 - Approved clients with the token have full control. Restart agents and clients
   after key or token changes; existing connections are not revoked.

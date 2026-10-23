@@ -48,6 +48,27 @@ impl FleetClient {
         match reply {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
+            Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
+        }
+    }
+
+    pub fn list_apps(&self, address: &str, server_name: &str) -> io::Result<Vec<StatusResponse>> {
+        let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
+        let request = AuthenticatedRequest {
+            token: self.token.clone(),
+            request: Request::ListApps,
+        };
+        let json = serde_json::to_string(&request)?;
+        stream.write_all(json.as_bytes())?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+
+        let response = tls::read_message(&mut stream)?;
+        let reply: Response = serde_json::from_str(&response)?;
+        match reply {
+            Response::Apps { apps } => Ok(apps),
+            Response::Error { message } => Err(io::Error::other(message)),
+            Response::Status { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app list, received app status")),
         }
     }
 
@@ -72,6 +93,9 @@ impl FleetClient {
             Response::Error { message } => {
                 return Err(io::Error::other(message));
             }
+            Response::Apps { .. } => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list"));
+            }
         }
 
         Ok(())
@@ -95,6 +119,27 @@ impl FleetClient {
         match reply {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
+            Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
+        }
+    }
+
+    pub fn scale_app(&self, address: &str, workload_name: &str, replicas: u32, server_name: &str) -> io::Result<StatusResponse> {
+        let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
+        let request = AuthenticatedRequest {
+            token: self.token.clone(),
+            request: Request::ScaleApp { workload_name: workload_name.to_owned(), replicas },
+        };
+        let json = serde_json::to_string(&request)?;
+        stream.write_all(json.as_bytes())?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+
+        let response = tls::read_message(&mut stream)?;
+        let reply: Response = serde_json::from_str(&response)?;
+        match reply {
+            Response::Status { status } => Ok(status),
+            Response::Error { message } => Err(io::Error::other(message)),
+            Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
         }
     }
 

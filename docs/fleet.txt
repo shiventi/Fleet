@@ -1,7 +1,8 @@
 Fleet is a Rust tool for running and checking apps across your computers.
 
 **Work in progress.** Agents can run several apps, with up to 32 copies each.
-Remote commands and views currently require a single-app agent.
+The dashboard selects and scales named apps. Other remote commands and watch
+still require a single-app agent.
 Failover and moving files are not ready yet.
 
 ## Start Here
