@@ -1,3 +1,4 @@
+use crate::runner::LogEntry;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +20,7 @@ pub enum Request {
     StopApp { workload_name: String },
     ScaleApp { workload_name: String, replicas: u32 },
     ListApps,
+    LogsApp { workload_name: String, after_id: u64 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,6 +28,7 @@ pub enum Response {
     Status { status: StatusResponse },
     Error { message: String },
     Apps { apps: Vec<StatusResponse> },
+    Logs { entries: Vec<LogEntry> },
 }
 
 // keep the token out of debug logs

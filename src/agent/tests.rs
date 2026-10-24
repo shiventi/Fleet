@@ -17,6 +17,91 @@ fn app(name: &str, replicas: u32) -> TestWorkload {
     }))
 }
 
+fn logged_app(name: &str, lines: &[String]) -> ManagedWorkload {
+    let mut app = ManagedWorkload::new(WorkloadSpec {
+        name: name.into(), program: "/usr/bin/printf".into(), args: vec!["%s\n".into()], replicas: 1,
+    });
+    app.spec.args.extend_from_slice(lines);
+    app.runner.start(&app.spec).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.runner.logs_after(0).len() < lines.len() {
+        if Instant::now() >= deadline {
+            app.runner.stop_all();
+            panic!("test app did not finish writing logs");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.runner.stop_all();
+    app
+}
+
+#[test]
+fn log_replies_page_through_lines_without_skipping_or_repeating_them() {
+    let lines = vec!["x".repeat(4096); 8];
+    let app = logged_app("logs", &lines);
+    let mut after_id = 0;
+    let mut received = Vec::new();
+    loop {
+        let reply = log_reply(&app.runner, after_id).unwrap();
+        assert!(serde_json::to_vec(&reply).unwrap().len() + 1 <= tls::MAX_MESSAGE_BYTES as usize);
+        let Response::Logs { entries } = reply else { panic!("expected logs") };
+        if entries.is_empty() {
+            break;
+        }
+        assert!(entries.len() < lines.len());
+        for entry in entries {
+            assert_eq!(entry.id, after_id + 1);
+            after_id = entry.id;
+            received.push(entry.text);
+        }
+    }
+    assert_eq!(received, lines);
+}
+
+#[test]
+fn escaped_large_lines_fit_without_changing_stored_logs() {
+    let original = "\u{1}".repeat(4096);
+    let app = logged_app("logs", &[original.clone(), "next".into()]);
+    let reply = log_reply(&app.runner, 0).unwrap();
+    let mut bytes = serde_json::to_vec(&reply).unwrap();
+    bytes.push(b'\n');
+    assert!(bytes.len() <= tls::MAX_MESSAGE_BYTES as usize);
+    assert!(tls::read_message(&mut bytes.as_slice()).is_ok());
+    let Response::Logs { entries } = reply else { panic!("expected logs") };
+    assert_eq!(entries[0].id, 1);
+    assert!(entries[0].text.ends_with(" [truncated]"));
+    assert!(entries[0].text.len() < original.len());
+    assert_eq!(app.runner.logs_after(0)[0].text, original);
+
+    let Response::Logs { entries } = log_reply(&app.runner, 1).unwrap() else { panic!("expected logs") };
+    assert_eq!(entries[0].text, "next");
+    assert!(matches!(log_reply(&app.runner, 2).unwrap(), Response::Logs { entries } if entries.is_empty()));
+}
+
+#[test]
+fn named_log_requests_require_auth_and_never_fall_back_to_another_app() {
+    let workloads = &mut [logged_app("api", &["api output".into()]), logged_app("worker", &["worker output".into()])];
+    for name in ["api", "worker"] {
+        let request = Request::LogsApp { workload_name: name.into(), after_id: 0 };
+        let Response::Logs { entries } = reply_for(workloads, "test-token", request) else { panic!("expected logs") };
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, format!("{name} output"));
+    }
+    for (token, name, expected) in [
+        ("test-token", "missing", "Unknown app: missing"),
+        ("wrong-token", "missing", "Authentication failed"),
+        ("wrong-token", "api", "Authentication failed"),
+    ] {
+        let request = Request::LogsApp { workload_name: name.into(), after_id: 0 };
+        let Response::Error { message } = reply_for(workloads, token, request) else { panic!("expected an error") };
+        assert_eq!(message, expected);
+    }
+    let request = Request::LogsApp { workload_name: "worker".into(), after_id: 1 };
+    assert!(matches!(reply_for(workloads, "test-token", request), Response::Logs { entries } if entries.is_empty()));
+    assert_eq!(workloads[0].spec.replicas, 1);
+    assert_eq!(workloads[1].spec.replicas, 1);
+}
+
 #[test]
 fn construction_keeps_settings_without_starting_processes() {
     let before = Instant::now();

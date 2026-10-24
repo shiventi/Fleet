@@ -35,6 +35,8 @@ Panics if the desired and observed workload names differ.
 
 Repeatedly observes the supplied workload and starts missing copies.
 Failed launches are logged and retried after at least five seconds.
+Prints captured stdout and stderr with log IDs and stream labels.
+Control characters are escaped before printing.
 
 ## load_manifest
 

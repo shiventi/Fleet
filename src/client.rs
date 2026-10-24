@@ -1,11 +1,14 @@
 use crate::device_tls;
 use crate::identity::DeviceIdentity;
 use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
+use crate::runner::LogEntry;
 use crate::tls::{self, TlsFiles};
 use crate::trust::TrustedPeer;
 use rustls::ClientConfig;
 use std::io::{self, Write};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 pub fn status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<()> {
     let status = fetch_status(address, server_name, files)?;
@@ -49,6 +52,7 @@ impl FleetClient {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
+            Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
         }
     }
 
@@ -69,7 +73,61 @@ impl FleetClient {
             Response::Apps { apps } => Ok(apps),
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Status { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app list, received app status")),
+            Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app list, received logs")),
         }
+    }
+
+    pub fn fetch_logs(&self, address: &str, workload_name: &str, after_id: u64, server_name: &str) -> io::Result<Vec<LogEntry>> {
+        let mut stream = tls::connect(address, server_name, Arc::clone(&self.config))?;
+        let request = AuthenticatedRequest {
+            token: self.token.clone(),
+            request: Request::LogsApp { workload_name: workload_name.to_owned(), after_id },
+        };
+        let json = serde_json::to_string(&request)?;
+        stream.write_all(json.as_bytes())?;
+        stream.write_all(b"\n")?;
+        stream.flush()?;
+
+        let response = tls::read_message(&mut stream)?;
+        let reply: Response = serde_json::from_str(&response)?;
+        match reply {
+            Response::Logs { entries } => Ok(entries),
+            Response::Error { message } => Err(io::Error::other(message)),
+            Response::Status { .. } | Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected logs, received app status or app list")),
+        }
+    }
+
+    pub fn logs(&self, address: &str, workload_name: &str, mut after_id: u64, server_name: &str, follow: bool) -> io::Result<()> {
+        let keep_alive = Arc::new(AtomicBool::new(true));
+        if follow {
+            let flag = Arc::clone(&keep_alive);
+            ctrlc::set_handler(move || flag.store(false, Ordering::SeqCst)).map_err(io::Error::other)?;
+        }
+        while keep_alive.load(Ordering::SeqCst) {
+            let entries = match self.fetch_logs(address, workload_name, after_id, server_name) {
+                Ok(entries) => entries,
+                Err(_) if !keep_alive.load(Ordering::SeqCst) => break,
+                Err(error) => return Err(error),
+            };
+            if let Err(error) = print_logs(&mut io::stdout().lock(), &entries, &mut after_id) {
+                if error.kind() == io::ErrorKind::BrokenPipe {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+            if !follow {
+                break;
+            }
+            if entries.is_empty() {
+                for _ in 0..10 {
+                    if !keep_alive.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn stop(&self, address: &str, server_name: &str) -> io::Result<()> {
@@ -96,6 +154,9 @@ impl FleetClient {
             Response::Apps { .. } => {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list"));
             }
+            Response::Logs { .. } => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs"));
+            }
         }
 
         Ok(())
@@ -120,6 +181,7 @@ impl FleetClient {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
+            Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
         }
     }
 
@@ -140,6 +202,7 @@ impl FleetClient {
             Response::Status { status } => Ok(status),
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
+            Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
         }
     }
 
@@ -172,6 +235,39 @@ impl FleetClient {
     }
 }
 
+pub(crate) fn print_logs(writer: &mut impl Write, entries: &[LogEntry], after_id: &mut u64) -> io::Result<()> {
+    let mut previous = *after_id;
+    for entry in entries {
+        if entry.id <= previous {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Log IDs must increase"));
+        }
+        previous = entry.id;
+    }
+    for entry in entries {
+        let stream = match entry.stream {
+            crate::runner::LogStream::Stdout => "stdout",
+            crate::runner::LogStream::Stderr => "stderr",
+        };
+        let text = log_text(&entry.text);
+        writeln!(writer, "[{} pid={} {}] {}", entry.id, entry.pid, stream, text)?;
+        *after_id = entry.id;
+    }
+    writer.flush()
+}
+
+pub fn log_text(text: &str) -> String {
+    // show control chars as text, not terminal commands
+    let mut safe = String::new();
+    for character in text.chars() {
+        if character.is_control() {
+            safe.extend(character.escape_default());
+        } else {
+            safe.push(character);
+        }
+    }
+    safe
+}
+
 pub fn fetch_status(address: &str, server_name: &str, files: &TlsFiles) -> io::Result<StatusResponse> {
     let client = FleetClient::new(files)?;
     return client.fetch_status(address, server_name);
@@ -189,3 +285,6 @@ pub fn scale(address: &str, replicas: u32, server_name: &str, files: &TlsFiles) 
     println!("Running copies: {}", status.running);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

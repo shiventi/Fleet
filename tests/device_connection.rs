@@ -169,6 +169,134 @@ impl Drop for Agent {
 }
 
 #[test]
+fn local_run_still_prints_stdout_and_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let manifest = root.path().join("local.json");
+    fs::write(&manifest, r#"{"name":"local-test","program":"/bin/sh","args":["-c","printf 'local-output\n'; printf 'local-error\n' >&2; sleep 60"],"replicas":1}"#).unwrap();
+    let log = root.path().join("run.log");
+    let output = fs::File::create(&log).unwrap();
+    let mut local = Agent {
+        child: command(root.path()).args(["run", manifest.to_str().unwrap()])
+            .stdout(output.try_clone().unwrap()).stderr(output).spawn().unwrap(),
+        log,
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let text = fs::read_to_string(&local.log).unwrap();
+        assert!(local.child.try_wait().unwrap().is_none(), "run exited early: {text}");
+        if text.contains("stdout] local-output") && text.contains("stderr] local-error") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "local output was lost: {text}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(local.stop().success());
+}
+
+#[test]
+fn log_cli_selects_an_app_follows_new_lines_and_stops_without_stopping_the_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let (server, server_public) = device(root.path(), "server");
+    let (client, client_public) = device(root.path(), "client");
+    approve(&server, "client", &client_public);
+    approve(&client, "server", &server_public);
+    let manifest = root.path().join("logs.json");
+    fs::write(&manifest, serde_json::to_vec(&serde_json::json!({ "workloads": [
+        { "name": "chatty", "program": "/bin/sh", "args": ["-c", "printf 'ready\\n'; printf '\\033[2Jwarning\\n' >&2; i=0; while [ \"$i\" -lt 60 ]; do i=$((i+1)); printf 'tick %s\\n' \"$i\"; sleep 1; done"], "replicas": 1 },
+        { "name": "other", "program": "/bin/sh", "args": ["-c", "printf 'other-app\\n'; sleep 60"], "replicas": 1 }
+    ] })).unwrap()).unwrap();
+    let (mut agent, address) = Agent::start(&server, &manifest, root.path().join("agent.log"));
+    let args = ["logs-device", "--address", &address, "--peer", "server", "--app", "chatty"];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let snapshot = loop {
+        let text = success(run(&client, &args));
+        if text.contains("stdout] ready") && text.contains("stderr]") && text.contains("tick ") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "logs did not arrive: {text}");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(snapshot.contains("\\u{1b}[2Jwarning"));
+    assert!(!snapshot.contains('\x1b'));
+    assert!(!snapshot.contains("other-app"));
+    let after: u64 = snapshot.lines().last().unwrap().trim_start_matches('[').split_whitespace().next().unwrap().parse().unwrap();
+
+    let mut resume_args = args.to_vec();
+    let max_id = u64::MAX.to_string();
+    resume_args.extend(["--after", &max_id]);
+    assert!(success(run(&client, &resume_args)).is_empty());
+    let bad = command(&client).env("FLEET_TOKEN", "wrong-token").args(args).output().unwrap();
+    assert!(!bad.status.success());
+    assert!(bad.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("Authentication failed"));
+
+    let log = root.path().join("follow.log");
+    let output = fs::File::create(&log).unwrap();
+    let mut follower = Agent {
+        child: command(&client).args(args).args(["--after", &after.to_string(), "--follow"])
+            .stdout(output.try_clone().unwrap()).stderr(output).spawn().unwrap(),
+        log,
+    };
+    let deadline = Instant::now() + Duration::from_secs(7);
+    loop {
+        let text = fs::read_to_string(&follower.log).unwrap();
+        assert!(follower.child.try_wait().unwrap().is_none(), "follower exited early: {text}");
+        if text.contains("stdout] tick ") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "follow did not print new logs: {text}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(follower.stop().success());
+    let output = fs::read_to_string(&follower.log).unwrap();
+    let mut previous = after;
+    for line in output.lines() {
+        let id: u64 = line.trim_start_matches('[').split_whitespace().next().unwrap().parse().unwrap();
+        assert!(id > previous, "repeated or old line: {line}");
+        previous = id;
+    }
+    assert!(agent.child.try_wait().unwrap().is_none());
+    assert!(success(run(&client, &resume_args)).is_empty());
+    assert!(agent.stop().success());
+}
+
+#[test]
+fn log_cli_works_with_certificates() {
+    let root = tempfile::tempdir().unwrap();
+    let tls = root.path().join("tls");
+    let setup = Command::new("sh").arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/dev-certs.sh")).arg(&tls).output().unwrap();
+    success(setup);
+    let ca = tls.join("ca.crt");
+    let cert = tls.join("server.crt");
+    let key = tls.join("server.key");
+    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reservation.local_addr().unwrap().to_string();
+    drop(reservation);
+    let log = root.path().join("agent.log");
+    let output = fs::File::create(&log).unwrap();
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/logs.json");
+    let mut agent = Agent {
+        child: command(root.path()).args(["agent", "--listen", &address, "--manifest", manifest.to_str().unwrap(), "--ca-cert", ca.to_str().unwrap(), "--cert", cert.to_str().unwrap(), "--private-key", key.to_str().unwrap()])
+            .stdout(output.try_clone().unwrap()).stderr(output).spawn().unwrap(),
+        log,
+    };
+    agent.ready();
+    let client_cert = tls.join("client.crt");
+    let client_key = tls.join("client.key");
+    let args = ["logs", "--address", &address, "--app", "log-demo", "--ca-cert", ca.to_str().unwrap(), "--cert", client_cert.to_str().unwrap(), "--private-key", client_key.to_str().unwrap()];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = success(run(root.path(), &args));
+        if output.contains("stdout] tick ") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "certificate logs did not arrive");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(agent.stop().success());
+}
+
+#[test]
 fn local_device_agent_checks_keys_and_tokens_and_shuts_down() {
     let root = tempfile::tempdir().unwrap();
     let (server, server_public) = device(root.path(), "server");
@@ -382,6 +510,71 @@ fn two_app_example_restarts_each_app_and_rejects_unnamed_commands() {
             assert_eq!(test_kill_process(pid), Err(rustix::io::Errno::SRCH), "child must be reaped");
         }
     }
+}
+
+#[test]
+#[ignore = "Requires expect and a working pseudoterminal"]
+fn device_dashboard_opens_logs_for_the_selected_app_and_returns_to_apps() {
+    let root = tempfile::tempdir().unwrap();
+    let (server, server_public) = device(root.path(), "server");
+    let (controller, controller_public) = device(root.path(), "controller");
+    approve(&server, "controller", &controller_public);
+    approve(&controller, "local-one", &server_public);
+    let manifest = root.path().join("apps.json");
+    fs::write(&manifest, serde_json::to_vec(&serde_json::json!({ "workloads": [
+        { "name": "alpha", "program": "/bin/sh", "args": ["-c", "printf 'alpha-output\\n'; sleep 60"], "replicas": 1 },
+        { "name": "beta", "program": "/bin/sh", "args": ["-c", "printf 'beta-output\\n' >&2; sleep 60"], "replicas": 1 }
+    ] })).unwrap()).unwrap();
+    let log = root.path().join("agent.log");
+    let (mut agent, address) = Agent::start(&server, &manifest, log.clone());
+    let cluster = root.path().join("cluster.json");
+    fs::write(&cluster, serde_json::to_vec(&serde_json::json!({ "nodes": [
+        { "name": "local-one", "address": address, "server_name": "localhost", "peer": "local-one" }
+    ] })).unwrap()).unwrap();
+    let output = Command::new("expect")
+        .env("HOME", &controller).env("FLEET_TOKEN", TOKEN).env("TERM", "xterm-256color")
+        .env("FLEET_BIN", env!("CARGO_BIN_EXE_fleet")).env("FLEET_MANIFEST", &cluster)
+        .args(["-c", r#"
+set timeout 15
+set stty_init "rows 24 columns 110"
+log_user 0
+proc see {text} {
+    global spawn_id
+    expect {
+        -exact $text {}
+        timeout {error "Did not see: $text"}
+        eof {error "Dashboard exited before: $text"}
+    }
+}
+if {[catch {
+    spawn -noecho $env(FLEET_BIN) dashboard-device --manifest $env(FLEET_MANIFEST)
+    see "beta"
+    send -- "\tl"
+    see "alpha-output"
+    send -- "\033"
+    after 300
+    send -- "\033\[Bl"
+    see "beta-output"
+    send -- "+"
+    after 300
+    send -- "\033"
+    after 300
+    send -- "q"
+    expect { eof {} timeout {error "Dashboard did not quit"} }
+    set result [wait]
+    if {[lindex $result 2] != 0 || [lindex $result 3] != 0} {error "Dashboard failed: $result"}
+} message]} {
+    puts stderr $message
+    catch {close}
+    catch {wait}
+    exit 1
+}
+"#]).output().expect("run expect");
+    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(agent.child.try_wait().unwrap().is_none());
+    let launches = agent.wait_for_apps(&[("alpha", 1), ("beta", 1)], Duration::from_secs(5));
+    assert_eq!(launches.len(), 2, "log keys must not scale an app");
+    assert!(agent.stop().success());
 }
 
 #[test]

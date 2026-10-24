@@ -37,6 +37,34 @@ Gets every app's name, copy counts, and host metrics without printing.
 ### Errors
 Returns an error if the request fails, is rejected, or gets the wrong reply type.
 
+## FleetClient::fetch_logs
+
+Gets a batch of log lines for one named app, newer than the supplied ID.
+Pass 0 to start with the oldest stored line. Pass the last returned ID for the next batch.
+An empty batch means there are no newer stored lines right now.
+Uses the same TLS config and token as the other commands.
+The logs CLI and dashboard log view use this method.
+
+### Errors
+Returns an error if the request fails, the app is unknown, authentication fails,
+or the reply is not a log batch.
+
+## FleetClient::logs
+
+Prints one batch, or keeps reading newer batches when follow is true.
+Log IDs advance only after printing. Out-of-order or repeated IDs are rejected.
+Control characters are escaped before printing to keep terminal commands inert.
+Ctrl+C stops follow without stopping the app. An in-flight request may take five seconds.
+When caught up, checks every half second. A connection error ends the viewer.
+
+## print_logs
+
+Checks IDs, prints each line's ID, process ID, stream, and safe text, then flushes.
+
+## log_text
+
+Escapes control characters for safe display in the CLI and dashboard.
+
 ## FleetClient::stop
 
 Asks the agent to stop its workload and prints the updated counts.

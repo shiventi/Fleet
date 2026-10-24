@@ -19,9 +19,23 @@ Creates an empty runner without starting any processes.
 Starts one copy of the workload and stores its process handle.
 The child does not inherit Fleet's control token.
 Each copy starts in its own process group.
+Stdout and stderr are read in background threads into a shared log buffer.
+The buffer keeps the latest 200 lines, with up to 4096 bytes per line.
+Long lines are cut short; invalid text is replaced safely.
+Logs are held in memory and lost when the runner is dropped.
+Apps may buffer their own output before Fleet can read it.
 
 ### Errors
-Returns an error if the program cannot be launched.
+Returns an error if the program or a pipe reader thread cannot be started.
+If a reader cannot start, stops the newly launched process group.
+
+## ProcessRunner::logs_after
+
+Returns copies of stored lines whose IDs are greater than the supplied ID.
+Use 0 to read all stored lines. Older lines may have been dropped.
+Each entry includes its ID, process ID, stream, and text.
+Stdout and stderr share IDs, but their original order is not guaranteed.
+This reads local memory; the agent uses it to build remote log replies.
 
 ## ProcessRunner::running_count
 

@@ -5,6 +5,9 @@ Shows live agent status and sends scale commands from a terminal table.
 Shows configured nodes while collecting their status in the background.
 Tab switches between Agents and Apps; Up/Down selects a row in the focused table.
 In Apps, = or + adds a copy, and - or Ctrl-minus removes one (0 to 32).
+Press l on a selected app to open its live logs; Esc returns to the same app table.
+Up/Down and PageUp/PageDown scroll; Home shows the oldest lines and End follows.
+Stderr is red. The log view has no scale controls; q or Ctrl+C still exits.
 Only the named app is changed. Selection follows names if a poll reorders the list;
 missing apps clear selection rather than switching to another app.
 Only one scale command can be pending. Command results appear below the table.
@@ -121,3 +124,13 @@ Finds the selected app by name after updates; clears it if the app is missing.
 ## apply_scale
 
 Checks the reply's app name and updates only that app in the stored list.
+
+## logs
+
+The optional full-screen log view and its background request worker.
+Keeps at most 200 lines. Both certificate and device-key dashboards use it.
+Fetches one batch at a time for the selected node and app. When caught up,
+checks every half second. Errors keep old logs visible and retry after two seconds.
+Replies from closed views are ignored, even when the next view is for the same app.
+Control characters are escaped before drawing. Long lines are clipped to the width.
+Reopen the view after an agent restart because log IDs reset.

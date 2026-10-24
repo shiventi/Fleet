@@ -87,11 +87,20 @@ Returns an error if encoding or writing fails.
 
 Checks the request's token before handling its command.
 Rejects unnamed commands when the agent has several apps. StatusApp, StopApp,
-and ScaleApp select one app by name. ListApps returns every app after checking
-the token. The dashboard uses named requests; standalone CLI app selection is not wired yet.
+ScaleApp, and LogsApp select one app by name. ListApps returns every app after checking
+the token. The dashboard and log CLI use named requests; status, stop, and scale
+CLI commands still require a single-app agent.
 Successful status, stop, and scale replies include host metrics from one shared
 sampler, refreshed at most once per second.
 
 ### Errors
 Returns an error if reading, writing, or encoding fails.
 Invalid requests or wrong tokens receive an error reply without changing the workload.
+
+## log_reply
+
+Returns stored lines newer than the supplied ID for one app.
+Each reply fits the 16 KiB message limit, including JSON escapes and the newline.
+Ask again using the last returned ID to get the next batch.
+If a single line is too large, the reply shortens it and adds `[truncated]`.
+The stored line is unchanged. Old lines can be lost when the buffer fills.

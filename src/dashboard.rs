@@ -16,6 +16,9 @@ use std::time::{Duration, Instant};
 
 const ACCENT: Color = Color::Rgb(50, 108, 229);
 
+mod logs;
+use logs::{LogCommand, LogResult, LogView};
+
 pub fn run(cluster: &ClusterSpec, files: &TlsFiles) -> io::Result<()> {
     let client = FleetClient::new(files)?;
     let clients = vec![client; cluster.nodes.len()];
@@ -41,6 +44,10 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
     let (sender, receiver) = mpsc::channel::<PollResult>();
     let (command_sender, command_receiver) = mpsc::sync_channel::<ScaleCommand>(1);
     let (result_sender, result_receiver) = mpsc::channel::<ScaleResult>();
+    let (log_sender, log_receiver) = mpsc::sync_channel::<LogCommand>(1);
+    let (log_result_sender, log_result_receiver) = mpsc::channel::<LogResult>();
+    let mut log_view: Option<LogView> = None;
+    let mut log_generation = 0;
     let mut pending: Option<usize> = None;
     let mut notice = String::new();
     let mut updated_after = vec![Instant::now(); cluster.nodes.len()];
@@ -63,6 +70,7 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
                 &keep_alive,
             )
         });
+        scope.spawn(|| logs::worker(cluster, clients, log_receiver, log_result_sender, &keep_alive));
         let result = ratatui::run(|terminal| {
             loop {
                 for update in receiver.try_iter() {
@@ -92,9 +100,23 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
                         }
                     }
                 }
+                for result in log_result_receiver.try_iter() {
+                    if let Some(view) = &mut log_view {
+                        view.apply(result);
+                    }
+                }
                 let index = selection.selected().unwrap_or(0);
                 sync_app_selection(node_apps(&states, index), &mut selected_app, &mut app_selection);
-                terminal.draw(|frame| draw(frame, cluster, &states, &mut selection, &mut app_selection, apps_focused, &notice))?;
+                if let Some(view) = &mut log_view {
+                    view.request(&log_sender);
+                }
+                terminal.draw(|frame| {
+                    if let Some(view) = &log_view {
+                        view.draw(frame, &cluster.nodes[view.index].name);
+                    } else {
+                        draw(frame, cluster, &states, &mut selection, &mut app_selection, apps_focused, &notice);
+                    }
+                })?;
 
                 if event::poll(Duration::from_millis(100))? {
                     if let Event::Key(key) = event::read()? {
@@ -104,6 +126,17 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
                                 && key.modifiers.contains(KeyModifiers::CONTROL));
 
                         if key.kind == KeyEventKind::Press {
+                            if let Some(view) = &mut log_view {
+                                if key.code == KeyCode::Char('q') || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)) {
+                                    break;
+                                }
+                                if key.code == KeyCode::Esc {
+                                    log_view = None;
+                                } else {
+                                    view.scroll(key.code);
+                                }
+                                continue;
+                            }
                             if quit {
                                 break;
                             }
@@ -112,6 +145,18 @@ fn run_clients(cluster: &ClusterSpec, clients: &[FleetClient]) -> io::Result<()>
                             let code = scale_key(key);
 
                             match code {
+                                KeyCode::Char('l') => {
+                                    if apps_focused {
+                                        if let Some(name) = &selected_app {
+                                            log_generation += 1;
+                                            log_view = Some(LogView::new(index, name.clone(), log_generation));
+                                        } else {
+                                            notice = String::from("Select an app before opening logs.");
+                                        }
+                                    } else {
+                                        notice = String::from("Select an app before opening logs.");
+                                    }
+                                }
                                 KeyCode::Tab | KeyCode::BackTab => {
                                     apps_focused = !apps_focused;
                                     if apps_focused && selected_app.is_none() {

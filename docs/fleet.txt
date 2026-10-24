@@ -1,8 +1,8 @@
 Fleet is a Rust tool for running and checking apps across your computers.
 
 **Work in progress.** Agents can run several apps, with up to 32 copies each.
-The dashboard selects and scales named apps. Other remote commands and watch
-still require a single-app agent.
+The dashboard selects and scales named apps and shows their live logs.
+Status, stop, scale, and watch CLI commands still require a single-app agent.
 Failover and moving files are not ready yet.
 
 ## Start Here
@@ -24,7 +24,7 @@ Use `cargo run -- --help` to see the commands.
 
 1. A JSON file describes the app and how many copies to run.
 2. The agent checks the processes and starts or stops copies to match that count.
-3. A client sends status, stop, and scale commands over mutual TLS.
+3. A client sends status, stop, scale, and log requests over mutual TLS.
 4. Watch and dashboard views show replies from the agents in a cluster file.
 
 A running process is not a full health check. An unreachable agent does not

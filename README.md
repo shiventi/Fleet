@@ -4,8 +4,8 @@
 
 Fleet is a Rust CLI to run and check apps across computers. Each agent runs
 one or more apps with up to 32 copies each and restarts missing copies.
-The dashboard can select and scale each app. Other remote commands and watch
-still require a single-app agent.
+The dashboard can select and scale each app, and logs can target an app by name.
+Status, stop, scale, and watch commands still require a single-app agent.
 
 Failover and file transfer are not ready yet.
 
@@ -36,11 +36,15 @@ cargo run -- dashboard-device --manifest examples/cluster-device.json
 
 Edit the cluster file with your agents' addresses and approved peer names first.
 Tab switches between Agents and Apps; arrows select a row.
-In Apps, `=` or `+` adds a copy; `-` removes one.
+In Apps, `=` or `+` adds a copy; `-` removes one. Press `l` for the selected app's
+live logs; Esc returns to Apps. Up/Down scrolls logs; End follows new lines.
 Esc returns to Agents, or exits there; `q` or Ctrl+C exits without stopping agents.
 `watch-device` prints counts instead. Use `cargo run -- --help` for all commands.
 The dashboard shows the selected host's CPU and RAM, not per-app usage.
 Use `cargo run -- metrics` for local CPU and RAM readings.
+
+Follow an app's stdout and stderr with `logs-device --address IP:PORT --peer NAME --app APP --follow`.
+See the [log demo](docs/usage.md#logs) for a local test.
 
 ## Limits
 

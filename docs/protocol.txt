@@ -61,6 +61,11 @@ Ask for every managed app's status. Requires the same authentication as commands
 
 Change the target; the agent adjusts processes on its next loop.
 
+## Request::LogsApp
+
+Ask for lines from workload_name with IDs greater than after_id.
+Use 0 for the oldest stored lines. Requires the same TLS and token checks as controls.
+
 ## Response
 
 An agent reply: current status or a reason the request was rejected.
@@ -76,6 +81,14 @@ A readable error message.
 ## Response::Apps
 
 The list returned by ListApps, with one StatusResponse per app.
+
+## Response::Logs
+
+A bounded batch of log entries, with IDs, process IDs, stream labels, and text.
+Use the last ID as after_id for the next request. Empty entries mean no new lines.
+Replies fit the 16 KiB message limit. A line that cannot fit on its own is shortened
+with `[truncated]` in the reply; the stored line stays unchanged.
+The buffer may drop old entries. IDs reset when the runner is recreated.
 
 ## AuthenticatedRequest
 

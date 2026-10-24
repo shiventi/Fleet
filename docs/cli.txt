@@ -49,6 +49,16 @@ Show a workload's current counts over mutual TLS.
 
 Stop the workload while keeping the agent running.
 
+## Commands::Logs
+
+Print one batch of a named app's logs using certificate authentication.
+Use --app for the app name, --after for the last seen ID, and --follow (or -f)
+to keep reading. Ctrl+C closes the viewer without stopping the agent or app.
+
+## Commands::LogsDevice
+
+The same log viewer, using --peer for a saved device key instead of TLS files.
+
 ## Commands::Stop::server_name
 
 Expected name in the agent's certificate, not its connection address.

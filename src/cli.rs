@@ -48,6 +48,36 @@ pub enum Commands {
     #[command(about = "show an app's status")]
     Status(StatusArgs),
 
+    #[command(about = "show an app's logs")]
+    Logs {
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        app: String,
+        #[arg(long, default_value = "localhost")]
+        server_name: String,
+        #[command(flatten)]
+        tls: TlsFiles,
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+        #[arg(short, long)]
+        follow: bool,
+    },
+
+    #[command(about = "show app logs with a saved device key")]
+    LogsDevice {
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        app: String,
+        #[arg(long)]
+        peer: String,
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+        #[arg(short, long)]
+        follow: bool,
+    },
+
     #[command(about = "stop the app, not the agent")]
     Stop {
         #[arg(long)]
@@ -182,4 +212,19 @@ pub struct StatusArgs {
     pub server_name: String,
     #[command(flatten)]
     pub tls: TlsFiles,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_log_commands_and_requires_app_names() {
+        let cli = Cli::try_parse_from(["fleet", "logs-device", "--address", "127.0.0.1:7070", "--peer", "server", "--app", "worker", "--after", "12", "-f"]).unwrap();
+        assert!(matches!(cli.command, Commands::LogsDevice { app, after: 12, follow: true, .. } if app == "worker"));
+        assert!(Cli::try_parse_from(["fleet", "logs-device", "--address", "127.0.0.1:7070", "--peer", "server"]).is_err());
+        assert!(Cli::try_parse_from(["fleet", "logs-device", "--address", "127.0.0.1:7070", "--peer", "server", "--app", "worker", "--after", "-1"]).is_err());
+        let cli = Cli::try_parse_from(["fleet", "logs", "--address", "127.0.0.1:7070", "--app", "worker", "--ca-cert", "ca.crt", "--cert", "client.crt", "--private-key", "client.key"]).unwrap();
+        assert!(matches!(cli.command, Commands::Logs { after: 0, follow: false, server_name, .. } if server_name == "localhost"));
+    }
 }

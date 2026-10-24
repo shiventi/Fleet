@@ -83,6 +83,7 @@ fn supervise(desired: WorkloadSpec) {
         .expect("failed to register the ctrl+c handler");
 
     let mut retry_at = Instant::now();
+    let mut last_log_id = 0;
 
     while keep_alive.load(Ordering::SeqCst) {
         let count = runner.running_count();
@@ -115,6 +116,11 @@ fn supervise(desired: WorkloadSpec) {
                     println!("Stopping isn't implemented yet for {}", workload_name);
                 }
             }
+        }
+        let entries = runner.logs_after(last_log_id);
+        if let Err(error) = client::print_logs(&mut std::io::stdout().lock(), &entries, &mut last_log_id) {
+            eprintln!("Failed to print app logs: {}", error);
+            break;
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
@@ -250,6 +256,24 @@ fn main() {
         } => {
             if let Err(error) = client::stop(&address, &server_name, &tls) {
                 eprintln!("Failed to stop workload: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Logs { address, app, server_name, tls, after, follow } => {
+            let result = client::FleetClient::new(&tls)
+                .and_then(|client| client.logs(&address, &app, after, &server_name, follow));
+            if let Err(error) = result {
+                eprintln!("Failed to read logs: {}", error);
+                std::process::exit(1);
+            }
+        }
+
+        Commands::LogsDevice { address, app, peer, after, follow } => {
+            let result = client::FleetClient::for_peer(&peer)
+                .and_then(|client| client.logs(&address, &app, after, "localhost", follow));
+            if let Err(error) = result {
+                eprintln!("Failed to read logs: {}", error);
                 std::process::exit(1);
             }
         }

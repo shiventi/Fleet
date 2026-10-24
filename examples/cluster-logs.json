@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {
+      "name": "log-demo",
+      "address": "127.0.0.1:7080",
+      "server_name": "localhost"
+    }
+  ]
+}

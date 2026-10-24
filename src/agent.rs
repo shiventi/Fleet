@@ -184,6 +184,35 @@ fn list_apps(workloads: &mut [ManagedWorkload], sampler: &mut Sampler) -> Respon
     Response::Apps { apps }
 }
 
+fn log_reply(runner: &ProcessRunner, after_id: u64) -> io::Result<Response> {
+    let mut entries = Vec::new();
+    // count the reply wrapper and final newline too
+    let mut bytes = serde_json::to_vec(&Response::Logs { entries: Vec::new() })?.len() + 1;
+    for mut entry in runner.logs_after(after_id) {
+        let mut size = serde_json::to_vec(&entry)?.len();
+        let comma = usize::from(!entries.is_empty());
+        if bytes + comma + size > tls::MAX_MESSAGE_BYTES as usize && !entries.is_empty() {
+            break;
+        }
+        // shorten only this copy if one line cannot fit
+        while bytes + size > tls::MAX_MESSAGE_BYTES as usize {
+            let mut end = entry.text.len() / 2;
+            while !entry.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Log entry cannot fit in a reply"));
+            }
+            entry.text.truncate(end);
+            entry.text.push_str(" [truncated]");
+            size = serde_json::to_vec(&entry)?.len();
+        }
+        bytes += comma + size;
+        entries.push(entry);
+    }
+    Ok(Response::Logs { entries })
+}
+
 fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], expected_token: &str, sampler: &mut Sampler) -> io::Result<()> {
     let input = tls::read_message(stream)?;
     let authenticated = match serde_json::from_str::<AuthenticatedRequest>(&input) {
@@ -211,6 +240,7 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
     let requested_name = match &authenticated.request {
         Request::StatusApp { workload_name }
         | Request::StopApp { workload_name }
+        | Request::LogsApp { workload_name, .. }
         | Request::ScaleApp { workload_name, .. } => Some(workload_name.as_str()),
         _ => None,
     };
@@ -237,6 +267,7 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
 
     let mut reply = match authenticated.request {
         Request::ListApps => unreachable!("list requests are handled above"),
+        Request::LogsApp { after_id, .. } => log_reply(&workload.runner, after_id)?,
         Request::Status | Request::StatusApp { .. } => Response::Status { status: workload.status() },
         Request::Stop | Request::StopApp { .. } => Response::Status { status: workload.stop() },
         Request::Scale { replicas } | Request::ScaleApp { replicas, .. } => match workload.scale(replicas) {
