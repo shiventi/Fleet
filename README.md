@@ -7,7 +7,7 @@ one or more apps with up to 32 copies each and restarts missing copies.
 The dashboard can select and scale each app, and logs can target an app by name.
 Status, stop, scale, and watch commands still require a single-app agent.
 
-Failover and file transfer are not ready yet.
+Local bundle code is in place, but has no CLI yet. Uploads and failover are not built.
 
 ## Try It
 

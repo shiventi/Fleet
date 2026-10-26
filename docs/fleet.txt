@@ -37,6 +37,7 @@ Pick a module to read its notes and browse its types and functions.
 | Area | Modules | What to look for |
 | --- | --- | --- |
 | Commands and files | [CLI](crate::cli), [workload](crate::workload) | Flags, app settings, and validation |
+| Deployment prep | [deploy](crate::deploy) | Local file checks and tar bundles; no CLI or upload yet |
 | Running apps | [agent](crate::agent), [runner](crate::runner) | Process checks, restarts, stop, and scale |
 | Remote control | [client](crate::client), [protocol](crate::protocol) | Requests, replies, and shared message types |
 | Multiple computers | [controller](crate::controller), [dashboard](crate::dashboard) | Cluster files, polling, and the terminal view |

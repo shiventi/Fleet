@@ -24,9 +24,10 @@ mod workload;
 mod trust;
 #[doc = include_str!("../docs/device_tls.txt")]
 mod device_tls;
-
 #[doc = include_str!("../docs/metrics.txt")]
 mod metrics;
+#[doc = include_str!("../docs/deploy.txt")]
+mod deploy;
 
 use clap::Parser;
 use cli::{Cli, Commands};

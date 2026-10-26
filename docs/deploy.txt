@@ -1,0 +1,54 @@
+Loads settings and builds a local tar bundle from the listed files.
+This module has no CLI command yet. It does not upload files, install dependencies,
+or start an app.
+
+## DeploySpec
+
+workload holds the existing app settings. files lists paths to include,
+relative to the folder containing the manifest. Only listed files are checked;
+directories are not scanned or copied. Review the list to keep secrets out.
+
+## DeploySpec::validate
+
+Checks the workload settings and rejects an empty file list.
+
+## DeploySpec::load_manifest
+
+Reads JSON, checks the settings, then checks each listed file using the manifest's folder.
+A bare filename uses the current folder. Read and parse errors include the manifest path.
+Loading does not run the app or change any source files.
+
+## DeploySpec::validate_files
+
+Resolves the supplied root folder. Listed paths must be nonempty and contain only
+normal path components: no absolute paths, parent traversal, or leading dot component.
+Checks every component for symlinks, including parent folders and dangling links.
+The final entry must be a regular file; missing files, directories, sockets, and
+pipes are rejected. Nested regular files are allowed.
+
+These are preflight checks, not a secure file reader. Packaging uses open_source
+to reject symlinks again while opening each component.
+
+## package
+
+Writes fleet.json with the serialized settings, then each listed file under app/.
+Streams file contents to a temporary tar file in the output folder.
+Finishes and syncs the file before saving it without replacing an existing output.
+Errors drop the temporary file. Source files are not changed or run.
+The output folder must already exist.
+
+## open_source
+
+Opens each path component relative to an open folder handle, rejecting symlinks
+and non-normal components. Intermediate entries must be directories; the last
+must be a regular file. Nonblocking opens avoid waiting on a substituted pipe.
+File handles stay tied to opened entries even if their paths are later replaced.
+This does not freeze file contents: keep source files stable during packaging.
+
+Size limits, duplicate file checks, CLI commands, and upload are still to be built.
+
+## Example
+
+examples/hello/fleet.json lists app.py and the command python3 -u app.py.
+The Python demo prints a count every second. Tests load the manifest without
+running Python. Run the deployment tests with cargo test --locked deploy::tests.
