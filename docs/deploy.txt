@@ -1,6 +1,6 @@
 Loads settings and builds a local tar bundle from the listed files.
-This module has no CLI command yet. It does not upload files, install dependencies,
-or start an app.
+The package command builds a bundle locally. It does not upload files, install
+dependencies, or start an app.
 
 ## DeploySpec
 
@@ -10,7 +10,8 @@ directories are not scanned or copied. Review the list to keep secrets out.
 
 ## DeploySpec::validate
 
-Checks the workload settings and rejects an empty file list.
+Checks the workload settings and rejects an empty file list or duplicate paths.
+Equivalent paths such as assets/data.txt and assets/./data.txt count as duplicates.
 
 ## DeploySpec::load_manifest
 
@@ -45,7 +46,7 @@ must be a regular file. Nonblocking opens avoid waiting on a substituted pipe.
 File handles stay tied to opened entries even if their paths are later replaced.
 This does not freeze file contents: keep source files stable during packaging.
 
-Size limits, duplicate file checks, CLI commands, and upload are still to be built.
+Size limits and upload are still to be built.
 
 ## Example
 

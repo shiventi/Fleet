@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::fs::File;
 use std::io;
 use rustix::fs::{open, openat, Mode, OFlags};
+use std::collections::HashSet;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DeploySpec {
@@ -17,6 +18,14 @@ impl DeploySpec {
 
         if self.files.is_empty() {
             return Err(String::from("Deployment must include files"));
+        }
+
+        let mut seen = HashSet::new();
+
+        for file in &self.files {
+            if !seen.insert(file) {
+                return Err(format!("Duplicate file: {}", file.display()));
+            }
         }
 
         Ok(())

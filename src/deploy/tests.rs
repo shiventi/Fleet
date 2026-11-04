@@ -69,6 +69,30 @@ fn rejects_empty_file_lists_and_invalid_workloads() {
 }
 
 #[test]
+fn rejects_duplicate_paths_including_equivalent_spellings() {
+    for files in [["app.py", "app.py"], ["assets/data.txt", "assets/./data.txt"], ["assets/data.txt", "assets//data.txt"]] {
+        let error = spec(&files).validate().unwrap_err();
+        assert!(error.starts_with("Duplicate file:"));
+        assert!(error.contains(files[1]));
+    }
+    assert!(spec(&["app.py", "assets/data.txt"]).validate().is_ok());
+}
+
+#[test]
+fn duplicate_files_are_rejected_before_creating_a_bundle() {
+    let root = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("app.py"), "hello").unwrap();
+    let path = manifest(root.path(), serde_json::json!({
+        "workload": { "name": "hello", "program": "python3", "args": [], "replicas": 1 },
+        "files": ["app.py", "app.py"]
+    }));
+    assert!(package(&path, &output.path().join("hello.tar")).unwrap_err().contains("Duplicate file: app.py"));
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 0);
+    assert_eq!(fs::read_to_string(root.path().join("app.py")).unwrap(), "hello");
+}
+
+#[test]
 fn rejects_empty_absolute_and_parent_paths() {
     let root = tempfile::tempdir().unwrap();
     for file in ["", "/app.py", "../app.py", "assets/../../app.py", ".", "./app.py", ".."] {

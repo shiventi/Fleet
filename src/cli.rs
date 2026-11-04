@@ -25,6 +25,14 @@ pub enum Commands {
         manifest: PathBuf,
     },
 
+    #[command(about = "package an app into a tar file")]
+    Package {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+
     #[command(about = "show this device's public key")]
     Identity {
         #[arg(help = "show the key hash instead")]
@@ -217,6 +225,16 @@ pub struct StatusArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_package_paths_and_requires_both_flags() {
+        let cli = Cli::try_parse_from(["fleet", "package", "--manifest", "examples/hello/fleet.json", "--output", "hello.tar"]).unwrap();
+        let Commands::Package { manifest, output } = cli.command else { panic!("expected package") };
+        assert_eq!(manifest, PathBuf::from("examples/hello/fleet.json"));
+        assert_eq!(output, PathBuf::from("hello.tar"));
+        assert!(Cli::try_parse_from(["fleet", "package", "--manifest", "fleet.json"]).is_err());
+        assert!(Cli::try_parse_from(["fleet", "package", "--output", "hello.tar"]).is_err());
+    }
 
     #[test]
     fn parses_log_commands_and_requires_app_names() {

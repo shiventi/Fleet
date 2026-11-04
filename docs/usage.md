@@ -164,15 +164,23 @@ renewal and revocation are not built yet.
   Each connection has a five-second deadline and 16 KiB message limit.
   The agent serves one client at a time.
 
-## Deployment Prep
+## Packaging
 
 `examples/hello/fleet.json` describes a Python app and lists `app.py` to include.
 The deployment loader checks those paths relative to the manifest's folder,
 rejecting missing files, symlinks, absolute paths, parent traversal, and non-files.
 Local packaging code builds a tar with fleet.json and the listed files under app/.
 It uses open folder handles to reject symlink swaps and never overwrites an output.
-Keep source files stable while packaging. There is no package/deploy command or upload yet;
-size limits and duplicate-file checks are still pending.
+Duplicate paths are rejected, including equivalent spellings such as assets/./data.txt.
+Keep source files stable while packaging. Size limits and upload are still pending.
+
+```sh
+cargo run -- package --manifest examples/hello/fleet.json --output /tmp/hello.tar
+tar -tf /tmp/hello.tar
+```
+
+The output contains fleet.json and app/app.py. Use a fresh output path; existing
+bundles are never overwritten. This does not upload or start the app.
 Run its tests with `cargo test --locked deploy::tests`.
 
 ## Checks

@@ -7,7 +7,7 @@ one or more apps with up to 32 copies each and restarts missing copies.
 The dashboard can select and scale each app, and logs can target an app by name.
 Status, stop, scale, and watch commands still require a single-app agent.
 
-Local bundle code is in place, but has no CLI yet. Uploads and failover are not built.
+Apps can be packaged locally. Uploads and failover are not built.
 
 ## Try It
 
@@ -16,6 +16,7 @@ Install Rust, then run from this folder on macOS or Linux:
 ```sh
 cargo run -- run examples/demo.json
 cargo run -- validate examples/demo.json
+cargo run -- package --manifest examples/hello/fleet.json --output /tmp/hello.tar
 ```
 
 The demo starts `sleep` again every ten seconds. Ctrl+C stops its process groups.

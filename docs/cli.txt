@@ -25,6 +25,12 @@ Check a manifest without starting any processes.
 
 Path to the application manifest.
 
+## Commands::Package
+
+Build a local tar using --manifest for the deployment JSON and --output for the bundle.
+Only listed files are included. Duplicate paths and existing outputs are rejected.
+Does not upload or run the app.
+
 ## Commands::Identity
 
 Create or reuse this device's identity and print its public key or fingerprint.

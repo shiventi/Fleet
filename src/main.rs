@@ -261,6 +261,16 @@ fn main() {
             }
         }
 
+        Commands::Package { manifest, output } => {
+            match deploy::package(&manifest, &output) {
+                Ok(()) => println!("Bundle saved to {}", output.display()),
+                Err(err) => {
+                    eprintln!("Failed to package app: {}", err);
+                    std::process::exit(1);
+                }
+            }
+        }
+
         Commands::Logs { address, app, server_name, tls, after, follow } => {
             let result = client::FleetClient::new(&tls)
                 .and_then(|client| client.logs(&address, &app, after, &server_name, follow));
