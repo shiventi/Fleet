@@ -303,3 +303,280 @@ fn packaging_does_not_follow_an_existing_output_symlink() {
     assert!(fs::symlink_metadata(&output).unwrap().file_type().is_symlink());
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
 }
+
+fn upload_info(bytes: &[u8]) -> BundleInfo {
+    BundleInfo { size: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)) }
+}
+
+#[test]
+fn accepts_the_file_count_limit_and_rejects_one_more() {
+    let mut app = spec(&[]);
+    app.files = (0..MAX_FILES).map(|index| PathBuf::from(format!("{index}.bin"))).collect();
+    assert!(app.validate().is_ok());
+    app.files.push(PathBuf::from("extra.bin"));
+    assert!(app.validate().unwrap_err().contains("File count"));
+}
+
+#[test]
+fn rejects_oversized_source_files_without_leaving_a_bundle() {
+    let root = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    File::create(root.path().join("large.bin")).unwrap().set_len(MAX_FILE_BYTES + 1).unwrap();
+    let path = manifest(root.path(), serde_json::to_value(spec(&["large.bin"])).unwrap());
+    let error = package(&path, &output.path().join("large.tar")).unwrap_err();
+    assert!(error.contains("25 MiB"));
+    assert!(error.contains("large.bin"));
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn accepts_source_size_limits_and_rejects_one_extra_byte() {
+    let root = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let mut app = spec(&["a.bin", "b.bin", "c.bin", "d.bin"]);
+    for file in &app.files {
+        File::create(root.path().join(file)).unwrap().set_len(MAX_FILE_BYTES).unwrap();
+    }
+    assert_eq!(MAX_FILE_BYTES * app.files.len() as u64, MAX_TOTAL_BYTES);
+    let path = manifest(root.path(), serde_json::to_value(&app).unwrap());
+    let bundle = output.path().join("limit.tar");
+    package(&path, &bundle).unwrap();
+    let saved_size = fs::metadata(&bundle).unwrap().len();
+    assert!(saved_size > MAX_TOTAL_BYTES);
+
+    fs::write(root.path().join("extra.bin"), [1]).unwrap();
+    app.files.push(PathBuf::from("extra.bin"));
+    manifest(root.path(), serde_json::to_value(&app).unwrap());
+    let error = package(&path, &output.path().join("too-large.tar")).unwrap_err();
+    assert!(error.contains("Combined files exceed 100 MiB"));
+    assert_eq!(fs::metadata(&bundle).unwrap().len(), saved_size);
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn bundle_info_matches_a_known_hash_without_changing_the_file() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("input.bin");
+    fs::write(&path, b"abc").unwrap();
+    let info = bundle_info(&path).unwrap();
+    assert_eq!(info.size, 3);
+    assert_eq!(info.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert_eq!(fs::read(&path).unwrap(), b"abc");
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn bundle_info_hashes_multiple_chunks_and_a_short_last_chunk() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("input.bin");
+    let bytes: Vec<u8> = (0..8192 * 2 + 17).map(|index| (index % 251) as u8).collect();
+    fs::write(&path, &bytes).unwrap();
+    let info = bundle_info(&path).unwrap();
+    assert_eq!(info.size, bytes.len() as u64);
+    assert_eq!(info.sha256, upload_info(&bytes).sha256);
+}
+
+#[test]
+fn bundle_info_reports_empty_files_but_rejects_missing_files_and_folders() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("empty.bin");
+    fs::write(&path, []).unwrap();
+    let info = bundle_info(&path).unwrap();
+    assert_eq!(info.size, 0);
+    assert_eq!(info.sha256, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert!(bundle_info(&root.path().join("missing.bin")).is_err());
+    assert_eq!(bundle_info(root.path()).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn bundle_info_accepts_128_mib_and_rejects_one_more_byte() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let limit = 128 * 1024 * 1024;
+    file.as_file().set_len(limit).unwrap();
+    let info = bundle_info(file.path()).unwrap();
+    assert_eq!(info.size, limit);
+    assert_eq!(info.sha256.len(), 64);
+    file.as_file().set_len(limit + 1).unwrap();
+    let error = bundle_info(file.path()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("128 MiB"));
+}
+
+#[cfg(unix)]
+#[test]
+fn bundle_info_rejects_symlinks_and_pipes() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("input.bin"), b"abc").unwrap();
+    symlink(root.path().join("input.bin"), root.path().join("link.bin")).unwrap();
+    assert!(bundle_info(&root.path().join("link.bin")).is_err());
+    let pipe = root.path().join("input.pipe");
+    assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+    assert_eq!(bundle_info(&pipe).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn receives_chunks_into_a_private_hash_named_file() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes: Vec<u8> = (0..8192 * 2 + 17).map(|index| (index % 251) as u8).collect();
+    let info = upload_info(&bytes);
+    let mut reader = io::Cursor::new(&bytes);
+    let path = receive_bundle(&mut reader, &info, root.path()).unwrap();
+    assert_eq!(path, root.path().join(format!("{}.tar", info.sha256)));
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    assert_eq!(reader.position(), info.size);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn receives_short_reads_until_the_announced_size() {
+    struct ShortReads<'a>(&'a [u8]);
+    impl Read for ShortReads<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let count = buffer.len().min(3);
+            self.0.read(&mut buffer[..count])
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let bytes = b"several short reads";
+    let mut reader = ShortReads(bytes);
+    let path = receive_bundle(&mut reader, &upload_info(bytes), root.path()).unwrap();
+    assert_eq!(fs::read(path).unwrap(), bytes);
+    assert!(reader.0.is_empty());
+}
+
+#[test]
+fn rejects_invalid_sizes_without_reading_or_creating_files() {
+    let root = tempfile::tempdir().unwrap();
+    for size in [0, 128 * 1024 * 1024 + 1, u64::MAX] {
+        let info = BundleInfo { size, sha256: upload_info(b"abc").sha256 };
+        let mut reader = io::Cursor::new(b"abc");
+        assert_eq!(receive_bundle(&mut reader, &info, root.path()).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(reader.position(), 0);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+    let info = BundleInfo { size: 128 * 1024 * 1024, sha256: "0".repeat(64) };
+    let error = receive_bundle(&mut io::empty(), &info, root.path()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn rejects_invalid_hashes_without_reading_or_creating_files() {
+    let root = tempfile::tempdir().unwrap();
+    for hash in [String::new(), "0".repeat(63), "0".repeat(65), "A".repeat(64), "g".repeat(64), "/".repeat(64), "\u{e9}".repeat(32)] {
+        let info = BundleInfo { size: 3, sha256: hash };
+        let mut reader = io::Cursor::new(b"abc");
+        assert_eq!(receive_bundle(&mut reader, &info, root.path()).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(reader.position(), 0);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn rejects_wrong_hashes_and_removes_partial_files() {
+    let root = tempfile::tempdir().unwrap();
+    let info = BundleInfo { size: 3, sha256: "0".repeat(64) };
+    let error = receive_bundle(&mut io::Cursor::new(b"abc"), &info, root.path()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("hash does not match"));
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn rejects_truncated_uploads_and_removes_partial_files() {
+    let root = tempfile::tempdir().unwrap();
+    for bytes in [b"".as_slice(), b"ab".as_slice()] {
+        let mut reader = io::Cursor::new(bytes);
+        let error = receive_bundle(&mut reader, &upload_info(b"abc"), root.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn stops_reading_at_the_announced_size() {
+    let root = tempfile::tempdir().unwrap();
+    let mut reader = io::Cursor::new(b"abcnext message");
+    let path = receive_bundle(&mut reader, &upload_info(b"abc"), root.path()).unwrap();
+    assert_eq!(fs::read(path).unwrap(), b"abc");
+    assert_eq!(reader.position(), 3);
+    let mut rest = String::new();
+    reader.read_to_string(&mut rest).unwrap();
+    assert_eq!(rest, "next message");
+}
+
+#[test]
+fn read_errors_remove_partial_files() {
+    struct BrokenReader;
+    impl Read for BrokenReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::ConnectionReset, "test connection lost"))
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut reader = io::Cursor::new(b"a").chain(BrokenReader);
+    let error = receive_bundle(&mut reader, &upload_info(b"abc"), root.path()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn receiving_never_replaces_an_existing_file() {
+    let root = tempfile::tempdir().unwrap();
+    let info = upload_info(b"abc");
+    let path = root.path().join(format!("{}.tar", info.sha256));
+    fs::write(&path, b"keep this").unwrap();
+    let error = receive_bundle(&mut io::Cursor::new(b"abc"), &info, root.path()).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read(path).unwrap(), b"keep this");
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn receiving_does_not_follow_an_existing_output_symlink() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let info = upload_info(b"abc");
+    let path = root.path().join(format!("{}.tar", info.sha256));
+    let target = root.path().join("keep.txt");
+    fs::write(&target, b"keep this").unwrap();
+    symlink(&target, &path).unwrap();
+    assert!(receive_bundle(&mut io::Cursor::new(b"abc"), &info, root.path()).is_err());
+    assert_eq!(fs::read(target).unwrap(), b"keep this");
+    assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn receiving_requires_an_existing_output_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let mut reader = io::Cursor::new(b"abc");
+    let error = receive_bundle(&mut reader, &upload_info(b"abc"), &root.path().join("missing")).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(reader.position(), 0);
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn packages_hashes_and_receives_a_real_bundle_without_extracting_it() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/hello/fleet.json");
+    let root = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let bundle = root.path().join("hello.tar");
+    package(&source, &bundle).unwrap();
+    let info = bundle_info(&bundle).unwrap();
+    let path = receive_bundle(&mut File::open(&bundle).unwrap(), &info, output.path()).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), fs::read(&bundle).unwrap());
+    let mut archive = tar::Archive::new(File::open(&path).unwrap());
+    let names: Vec<_> = archive.entries().unwrap().map(|entry| entry.unwrap().path().unwrap().into_owned()).collect();
+    assert_eq!(names, [PathBuf::from("fleet.json"), PathBuf::from("app/app.py")]);
+    assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+    assert!(!output.path().join("app").exists());
+}

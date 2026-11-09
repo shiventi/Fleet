@@ -7,7 +7,7 @@ one or more apps with up to 32 copies each and restarts missing copies.
 The dashboard can select and scale each app, and logs can target an app by name.
 Status, stop, scale, and watch commands still require a single-app agent.
 
-Apps can be packaged locally. Uploads and failover are not built.
+Apps can be packaged locally with file and size limits. Network uploads and failover are not built.
 
 ## Try It
 

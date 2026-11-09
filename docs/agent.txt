@@ -97,6 +97,13 @@ sampler, refreshed at most once per second.
 Returns an error if reading, writing, or encoding fails.
 Invalid requests or wrong tokens receive an error reply without changing the workload.
 
+## handle_upload
+
+Sends UploadReady, receives the announced bytes, then replies with Uploaded and
+the hash, or an error. The caller must authenticate first and choose the folder.
+This helper is not routed from handle_client yet; uploads still return an error.
+A bounded background worker and upload CLI are not connected yet.
+
 ## log_reply
 
 Returns stored lines newer than the supplied ID for one app.

@@ -1,10 +1,24 @@
 # Test Helpers
 
+## src/deploy/tests.rs
+
+Checks package limits, hashes, short reads, cleanup, and overwrite protection.
+Uses temporary folders and sparse files for large size boundaries; no network upload.
+
 ## src/agent/tests.rs
 
 ### TestWorkload
 
 Makes sure tests reap every child, even if an assertion fails.
+
+### upload tests
+
+Checks the ready, raw bytes, and save-or-error exchange over local mutual TLS.
+Also checks that agent upload requests remain disabled and require the token.
+
+## src/client/tests.rs and src/protocol.rs
+
+Checks upload JSON and rejects upload replies in normal client commands.
 
 ## src/device_tls/tests.rs
 

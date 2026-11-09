@@ -391,3 +391,79 @@ fn listing_apps_requires_auth_and_keeps_their_targets() {
     assert_eq!(workloads[0].spec.replicas, 1);
     assert_eq!(workloads[1].spec.replicas, 2);
 }
+
+#[test]
+fn upload_handler_sends_ready_then_confirms_or_rejects_the_bytes_over_tls() {
+    use sha2::{Digest, Sha256};
+    let server = DeviceIdentity::generate().unwrap();
+    let client = DeviceIdentity::generate().unwrap();
+    let mut store = TrustStore::new();
+    store.add(crate::trust::TrustedPeer { name: "client".into(), public_key: client.public_key_pem() }).unwrap();
+    let server_config = Arc::new(device_tls::server_config(&server, &store).unwrap());
+    let peer = crate::trust::TrustedPeer { name: "server".into(), public_key: server.public_key_pem() };
+    let client_config = Arc::new(device_tls::client_config(&client, &peer).unwrap());
+    let bytes = vec![b'x'; 20 * 1024];
+
+    for valid in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let hash = if valid { format!("{:x}", Sha256::digest(&bytes)) } else { "0".repeat(64) };
+        let info = BundleInfo { size: bytes.len() as u64, sha256: hash.clone() };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+
+        let reply: Response = std::thread::scope(|scope| {
+            let config = Arc::clone(&client_config);
+            let bytes = &bytes;
+            let client = scope.spawn(move || {
+                let mut stream = tls::connect(&address, "localhost", config).unwrap();
+                let ready: Response = serde_json::from_str(&tls::read_message(&mut stream).unwrap()).unwrap();
+                assert!(matches!(ready, Response::UploadReady));
+                stream.write_all(bytes).unwrap();
+                stream.flush().unwrap();
+                serde_json::from_str(&tls::read_message(&mut stream).unwrap()).unwrap()
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "upload client did not connect");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("test listener failed: {error}"),
+                }
+            };
+            let mut stream = tls::accept(socket, Arc::clone(&server_config)).unwrap();
+            handle_upload(&mut stream, &info, directory.path()).unwrap();
+            client.join().unwrap()
+        });
+
+        if valid {
+            assert!(matches!(reply, Response::Uploaded { sha256 } if sha256 == hash));
+            assert_eq!(std::fs::read(directory.path().join(format!("{hash}.tar"))).unwrap(), bytes);
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        } else {
+            assert!(matches!(reply, Response::Error { message } if message == "Bundle hash does not match"));
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+    }
+}
+
+#[test]
+fn upload_requests_stay_disabled_and_check_the_token_first() {
+    let manifest: AgentManifest = serde_json::from_str(include_str!("../../examples/apps.json")).unwrap();
+    let mut workloads: Vec<_> = manifest.workloads.into_iter().map(ManagedWorkload::new).collect();
+    workloads.truncate(1);
+    let desired = workloads[0].spec.replicas;
+
+    for (token, expected) in [("wrong-token", "Authentication failed"), ("test-token", "Upload is not connected yet")] {
+        let request = Request::Upload { bundle: BundleInfo { size: 3, sha256: "0".repeat(64) } };
+        match reply_for(&mut workloads, token, request) {
+            Response::Error { message } => assert_eq!(message, expected),
+            reply => panic!("upload must stay disabled: {reply:?}"),
+        }
+        assert_eq!(workloads[0].spec.replicas, desired);
+        assert_eq!(workloads[0].runner.running_count(), 0);
+    }
+}

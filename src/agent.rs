@@ -1,6 +1,6 @@
 use crate::device_tls;
 use crate::identity::DeviceIdentity;
-use crate::protocol::{AuthenticatedRequest, Request, Response, StatusResponse};
+use crate::protocol::{AuthenticatedRequest, BundleInfo, Request, Response, StatusResponse};
 use crate::runner::ProcessRunner;
 use crate::tls::{self, ServerStream, TlsFiles};
 use crate::trust::TrustStore;
@@ -9,6 +9,7 @@ use crate::{Action, ObservedWorkload, plan};
 use rustls::ServerConfig;
 use std::io::{self, Write};
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -174,6 +175,15 @@ fn send_reply(writer: &mut ServerStream, reply: &Response) -> io::Result<()> {
     Ok(())
 }
 
+fn handle_upload(stream: &mut ServerStream, bundle: &BundleInfo, directory: &Path) -> io::Result<()> {
+    send_reply(stream, &Response::UploadReady)?;
+    let reply = match crate::deploy::receive_bundle(stream, bundle, directory) {
+        Ok(_) => Response::Uploaded { sha256: bundle.sha256.clone() },
+        Err(error) => Response::Error { message: error.to_string() },
+    };
+    send_reply(stream, &reply)
+}
+
 fn list_apps(workloads: &mut [ManagedWorkload], sampler: &mut Sampler) -> Response {
     let mut apps = Vec::new();
     for workload in workloads {
@@ -273,6 +283,9 @@ fn handle_client(stream: &mut ServerStream, workloads: &mut [ManagedWorkload], e
         Request::Scale { replicas } | Request::ScaleApp { replicas, .. } => match workload.scale(replicas) {
             Ok(status) => Response::Status { status },
             Err(message) => Response::Error { message },
+        },
+        Request::Upload { .. } => Response::Error {
+            message: String::from("Upload is not connected yet"),
         },
     };
     if let Response::Status { status } = &mut reply {

@@ -53,6 +53,7 @@ impl FleetClient {
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
             Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
+            Response::UploadReady | Response::Uploaded { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply")),
         }
     }
 
@@ -74,6 +75,7 @@ impl FleetClient {
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Status { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app list, received app status")),
             Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app list, received logs")),
+            Response::UploadReady | Response::Uploaded { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply")),
         }
     }
 
@@ -94,6 +96,7 @@ impl FleetClient {
             Response::Logs { entries } => Ok(entries),
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Status { .. } | Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected logs, received app status or app list")),
+            Response::UploadReady | Response::Uploaded { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply")),
         }
     }
 
@@ -157,6 +160,12 @@ impl FleetClient {
             Response::Logs { .. } => {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs"));
             }
+            Response::UploadReady => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply"));
+            }
+            Response::Uploaded { .. } => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply"));
+            }
         }
 
         Ok(())
@@ -182,6 +191,7 @@ impl FleetClient {
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
             Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
+            Response::UploadReady | Response::Uploaded { .. } => {Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply"))},
         }
     }
 
@@ -203,6 +213,7 @@ impl FleetClient {
             Response::Error { message } => Err(io::Error::other(message)),
             Response::Apps { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received app list")),
             Response::Logs { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Expected app status, received logs")),
+            Response::UploadReady | Response::Uploaded { .. } => Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected upload reply")),
         }
     }
 

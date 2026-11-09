@@ -1,4 +1,4 @@
-Loads settings and builds a local tar bundle from the listed files.
+Loads settings, builds local tar bundles, and checks received bytes.
 The package command builds a bundle locally. It does not upload files, install
 dependencies, or start an app.
 
@@ -12,6 +12,7 @@ directories are not scanned or copied. Review the list to keep secrets out.
 
 Checks the workload settings and rejects an empty file list or duplicate paths.
 Equivalent paths such as assets/data.txt and assets/./data.txt count as duplicates.
+Allows at most 256 listed files.
 
 ## DeploySpec::load_manifest
 
@@ -37,6 +38,30 @@ Streams file contents to a temporary tar file in the output folder.
 Finishes and syncs the file before saving it without replacing an existing output.
 Errors drop the temporary file. Source files are not changed or run.
 The output folder must already exist.
+Checks each opened source's size before copying: at most 25 MiB per file and
+100 MiB combined. These counts exclude the manifest and tar headers.
+
+## bundle_info
+
+Reads a regular file in 8 KiB chunks and returns its byte count and lowercase
+SHA-256 hash. Rejects non-files and files above 128 MiB; the final path component
+cannot be a symlink.
+An empty file has a valid hash, but receive_bundle rejects empty uploads.
+Does not check tar entries or freeze the file. Keep it unchanged before sending.
+
+## receive_bundle
+
+Reads exactly the announced bytes into a private temporary file in an existing,
+agent-controlled folder. Requires a size from 1 byte to 128 MiB and a 64-character
+lowercase hexadecimal hash. Uses an 8 KiB buffer; later bytes stay unread.
+Rejects early EOF, read errors, and hash mismatches. Saves as `<hash>.tar`
+only after checking and syncing the file, without replacing existing files or
+symlinks. Errors remove the temporary file.
+
+This helper is not connected to a client command or agent request yet. It does
+not check tar entries, extract files, or start apps. Its caller must provide
+authentication, read deadlines, and storage limits before accepting network data.
+The destination folder must not be writable by untrusted users.
 
 ## open_source
 
@@ -46,7 +71,7 @@ must be a regular file. Nonblocking opens avoid waiting on a substituted pipe.
 File handles stay tied to opened entries even if their paths are later replaced.
 This does not freeze file contents: keep source files stable during packaging.
 
-Size limits and upload are still to be built.
+Network uploads, tar validation, and installation are still to be built.
 
 ## Example
 

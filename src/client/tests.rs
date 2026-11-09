@@ -96,6 +96,27 @@ fn other_client_calls_reject_log_replies() {
 }
 
 #[test]
+fn normal_commands_reject_upload_replies() {
+    for uploaded in [false, true] {
+        for request in [Request::Status, Request::ListApps, Request::Stop, Request::Scale { replicas: 1 }, Request::ScaleApp { workload_name: "worker".into(), replicas: 1 }, Request::LogsApp { workload_name: "worker".into(), after_id: 0 }] {
+            let command = serde_json::to_value(&request).unwrap()["command"].as_str().unwrap().to_owned();
+            let reply = if uploaded { Response::Uploaded { sha256: "0".repeat(64) } } else { Response::UploadReady };
+            let error = with_reply(request, reply, |client, address| match command.as_str() {
+                "status" => client.fetch_status(address, "localhost").map(|_| ()),
+                "list_apps" => client.list_apps(address, "localhost").map(|_| ()),
+                "stop" => client.stop(address, "localhost"),
+                "scale" => client.scale(address, 1, "localhost").map(|_| ()),
+                "scale_app" => client.scale_app(address, "worker", 1, "localhost").map(|_| ()),
+                "logs_app" => client.fetch_logs(address, "worker", 0, "localhost").map(|_| ()),
+                _ => unreachable!(),
+            }).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "Unexpected upload reply");
+        }
+    }
+}
+
+#[test]
 fn prints_streams_and_escapes_terminal_controls() {
     let entries = vec![
         LogEntry { id: 3, pid: 42, stream: LogStream::Stdout, text: "hello".into() },

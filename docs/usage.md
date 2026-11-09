@@ -172,7 +172,8 @@ rejecting missing files, symlinks, absolute paths, parent traversal, and non-fil
 Local packaging code builds a tar with fleet.json and the listed files under app/.
 It uses open folder handles to reject symlink swaps and never overwrites an output.
 Duplicate paths are rejected, including equivalent spellings such as assets/./data.txt.
-Keep source files stable while packaging. Size limits and upload are still pending.
+Limits are 256 files, 25 MiB each, and 100 MiB combined source data, checked before
+copying. The manifest and tar headers add space. Keep source files stable while packaging.
 
 ```sh
 cargo run -- package --manifest examples/hello/fleet.json --output /tmp/hello.tar
@@ -181,6 +182,10 @@ tar -tf /tmp/hello.tar
 
 The output contains fleet.json and app/app.py. Use a fresh output path; existing
 bundles are never overwritten. This does not upload or start the app.
+Internal helpers can hash and receive up to 128 MiB, checking the size and SHA-256
+before saving without overwrites. The TLS upload handler is tested on its own;
+agent upload requests still return an error. The worker, CLI, tar checks, and
+installation are not connected yet.
 Run its tests with `cargo test --locked deploy::tests`.
 
 ## Checks

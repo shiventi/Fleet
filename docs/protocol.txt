@@ -28,6 +28,13 @@ Optional host CPU and RAM readings. Replies without this field still work.
 cpu_percent is whole-host CPU usage, or None while warming up.
 used_mem and total_mem are bytes, not per-app memory.
 
+## BundleInfo
+
+size is the complete bundle's byte count; sha256 is its lowercase SHA-256 hash.
+Used by the upload header and local hashing and receiving helpers.
+JSON decoding alone does not validate these values; the receiver checks them.
+A matching hash checks the bytes, not who sent them or whether the tar is safe.
+
 ## Request
 
 A client command carried inside an authenticated request.
@@ -66,6 +73,11 @@ Change the target; the agent adjusts processes on its next loop.
 Ask for lines from workload_name with IDs greater than after_id.
 Use 0 for the oldest stored lines. Requires the same TLS and token checks as controls.
 
+## Request::Upload
+
+Carries BundleInfo, not file bytes. The agent still rejects this request;
+the background worker and upload CLI are not connected yet.
+
 ## Response
 
 An agent reply: current status or a reason the request was rejected.
@@ -89,6 +101,13 @@ Use the last ID as after_id for the next request. Empty entries mean no new line
 Replies fit the 16 KiB message limit. A line that cannot fit on its own is shortened
 with `[truncated]` in the reply; the stored line stays unchanged.
 The buffer may drop old entries. IDs reset when the runner is recreated.
+
+## Response::UploadReady and Response::Uploaded
+
+The upload helper sends UploadReady before reading raw bytes. The sender must
+wait for it. Uploaded includes the hash after the receiver checks and saves the
+bytes; failures use Error. Normal status, list, log, and control calls reject
+both upload replies. This flow is tested locally but not enabled in the agent.
 
 ## AuthenticatedRequest
 
